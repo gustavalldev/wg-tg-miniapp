@@ -73,9 +73,16 @@ CREATE TABLE IF NOT EXISTS public.peer_logs
 );
 
 -- FK users -> tariffs
-ALTER TABLE public.users
-  ADD CONSTRAINT users_tariff_id_fkey FOREIGN KEY (tariff_id)
-  REFERENCES public.tariffs(id);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'users_tariff_id_fkey'
+  ) THEN
+    ALTER TABLE public.users
+      ADD CONSTRAINT users_tariff_id_fkey FOREIGN KEY (tariff_id)
+      REFERENCES public.tariffs(id);
+  END IF;
+END $$;
 
 ALTER TABLE public.peers
   ADD CONSTRAINT peers_server_id_fkey FOREIGN KEY (server_id)
@@ -89,6 +96,7 @@ CREATE INDEX IF NOT EXISTS peers_server_id_idx ON public.peers (server_id);
 CREATE INDEX IF NOT EXISTS peer_logs_user_id_idx ON public.peer_logs (user_id);
 CREATE UNIQUE INDEX IF NOT EXISTS servers_name_uq ON public.servers (name);
 CREATE UNIQUE INDEX IF NOT EXISTS servers_ip_uq ON public.servers (ip);
+CREATE UNIQUE INDEX IF NOT EXISTS tariffs_name_uq ON public.tariffs (name);
 
 -- Example seed (optional)
 -- INSERT INTO public.servers (id, name, ip, location, is_default)
