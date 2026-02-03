@@ -1,0 +1,181 @@
+:root {
+  color-scheme: light;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: #f6f7fb;
+  color: #1c1c1e;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+}
+
+.app {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 24px 16px 40px;
+}
+
+.app__header {
+  margin-bottom: 16px;
+}
+
+.tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.tab {
+  border: 1px solid #e1e4eb;
+  background: #ffffff;
+  border-radius: 999px;
+  padding: 8px 14px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.tab--active {
+  background: #2f5cff;
+  color: #fff;
+  border-color: #2f5cff;
+}
+
+.card {
+  background: #ffffff;
+  border-radius: 16px;
+  padding: 16px;
+  margin-bottom: 16px;
+  box-shadow: 0 8px 24px rgba(25, 29, 35, 0.08);
+}
+
+.card h2 {
+  margin-top: 0;
+}
+
+.muted {
+  color: #666b7a;
+}
+
+.info {
+  line-height: 1.6;
+  margin-bottom: 16px;
+  white-space: pre-line;
+}
+
+.actions {
+  display: grid;
+  gap: 8px;
+}
+
+.button {
+  border: none;
+  border-radius: 12px;
+  padding: 12px 16px;
+  background: #2f5cff;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  text-align: center;
+}
+
+.button--secondary {
+  background: #f0f1f6;
+  color: #1c1c1e;
+}
+
+.instructions {
+  padding-left: 18px;
+  margin: 0 0 12px;
+  line-height: 1.6;
+}
+
+.link {
+  color: #2f5cff;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.admin-section {
+  margin-top: 16px;
+}
+
+.admin-controls {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.input {
+  border: 1px solid #e1e4eb;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 14px;
+}
+
+.admin-list {
+  white-space: pre-line;
+  line-height: 1.5;
+  font-size: 14px;
+}
+
+.admin-item {
+  display: grid;
+  gap: 6px;
+  padding: 10px 0;
+  border-bottom: 1px solid #eef0f4;
+}
+
+.admin-item:last-child {
+  border-bottom: none;
+}
+
+.admin-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.server-select {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.label {
+  font-weight: 600;
+}
+
+.server-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.badge {
+  background: #e8efff;
+  color: #2f5cff;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.textarea {
+  width: 100%;
+  border: 1px solid #e1e4eb;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 14px;
+  margin-bottom: 8px;
+  resize: vertical;
+}
+
+.error {
+  background: #ffe8e8;
+  color: #8a1f1f;
+}

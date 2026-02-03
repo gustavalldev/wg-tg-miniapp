@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  # Telegram Bot
+  telegram-bot:
+    build: ./bot
+    container_name: telegram-bot
+    environment:
+      - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
+      - PG_HOST=${PG_HOST}
+      - PG_PORT=${PG_PORT}
+      - PG_DATABASE=${PG_DATABASE}
+      - PG_USER=${PG_USER}
+      - PG_PASSWORD=${PG_PASSWORD}
+      - CHANNEL_USERNAME=${CHANNEL_USERNAME}
+      - WEBAPP_URL=${WEBAPP_URL}
+    restart: unless-stopped
+
+  mini-app:
+    build: ./mini-app
+    container_name: mini-app
+    ports:
+      - "3012:3002"
+    environment:
+      - MINI_APP_PORT=3002
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:15
+    container_name: vpn_postgres
+    restart: always
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "5435:5432"
+    volumes:
+      - ./database/pgdata:/var/lib/postgresql/data
