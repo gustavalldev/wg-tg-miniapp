@@ -107,7 +107,7 @@ export default function App() {
 
     if (!data.subscribed) {
       setSubscribed(false);
-      setStatusLine('Подпишитесь на канал для доступа.');
+      setStatusLine('VPN Guard');
       setIsAdmin(false);
       return;
     }
