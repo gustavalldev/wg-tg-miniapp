@@ -80,6 +80,8 @@ TELEGRAM_TOKEN=your_bot_token_here
 WEBAPP_URL=http://localhost:3012
 CHANNEL_USERNAME=@kirillprodev
 ADMIN_USERNAMES=kirillprodev
+VITE_API_BASE=http://localhost:3010
+VITE_CHANNEL_USERNAME=@kirillprodev
 ```
 
 3. **Запустите через Docker:**
@@ -237,8 +239,8 @@ cd wireguard-manager/api && npm start
 - `SERVERS_JSON` - JSON массив серверов для списка (если не указан, берётся один SERVER_IP)
 
 ### Переменные окружения мини‑аппа (React)
-- `VITE_API_BASE` - URL API (по умолчанию: http://localhost:3010)
-- `VITE_CHANNEL_USERNAME` - канал для подписки (по умолчанию: @kirillprodev)
+- `VITE_API_BASE` - URL API (используется при сборке Docker)
+- `VITE_CHANNEL_USERNAME` - канал для подписки (используется при сборке Docker)
 
 ## 🔒 Безопасность
 

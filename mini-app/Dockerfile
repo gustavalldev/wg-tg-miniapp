@@ -3,6 +3,10 @@ WORKDIR /app
 COPY client/package.json client/package-lock.json* ./client/
 RUN cd client && npm install
 COPY client ./client
+ARG VITE_API_BASE
+ARG VITE_CHANNEL_USERNAME
+ENV VITE_API_BASE=$VITE_API_BASE
+ENV VITE_CHANNEL_USERNAME=$VITE_CHANNEL_USERNAME
 RUN cd client && npm run build
 
 FROM node:18-alpine

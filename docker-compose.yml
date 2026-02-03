@@ -4,7 +4,7 @@ services:
   # Telegram Bot
   telegram-bot:
     build: ./bot
-    container_name: telegram-bot
+    container_name: vpntg-telegram-bot
     environment:
       - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
       - PG_HOST=${PG_HOST}
@@ -17,8 +17,12 @@ services:
     restart: unless-stopped
 
   mini-app:
-    build: ./mini-app
-    container_name: mini-app
+    container_name: vpntg-mini-app
+    build:
+      context: ./mini-app
+      args:
+        VITE_API_BASE: ${VITE_API_BASE}
+        VITE_CHANNEL_USERNAME: ${VITE_CHANNEL_USERNAME}
     ports:
       - "3012:3002"
     environment:
@@ -27,7 +31,7 @@ services:
 
   postgres:
     image: postgres:15
-    container_name: vpn_postgres
+    container_name: vpntg-postgres
     restart: always
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
