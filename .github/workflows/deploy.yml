@@ -19,3 +19,12 @@ jobs:
             git pull
             docker-compose down --remove-orphans || true
             docker-compose up -d --build
+
+      - name: Notify Telegram
+        if: success()
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.DEPLOY_BOT_TOKEN }}/sendMessage" \
+            -d chat_id=${{ secrets.DEPLOY_CHAT_ID }} \
+            -d text="✅ Деплой завершён: ${{ github.repository }} (${{
+              github.ref_name
+            }})"
