@@ -5,6 +5,7 @@ CREATE SEQUENCE IF NOT EXISTS public.users_id_seq;
 CREATE SEQUENCE IF NOT EXISTS public.tariffs_id_seq;
 CREATE SEQUENCE IF NOT EXISTS public.peers_id_seq;
 CREATE SEQUENCE IF NOT EXISTS public.peer_logs_id_seq;
+CREATE SEQUENCE IF NOT EXISTS public.access_profiles_id_seq;
 
 -- Tables
 CREATE TABLE IF NOT EXISTS public.users
@@ -38,9 +39,12 @@ CREATE TABLE IF NOT EXISTS public.peers
   user_id integer,
   server_id text,
   name text NOT NULL,
-  public_key text NOT NULL,
-  private_key text NOT NULL,
+  public_key text,
+  private_key text,
   ip text NOT NULL,
+  protocol text DEFAULT 'managed-vpn'::text,
+  access_uri text,
+  config_payload jsonb DEFAULT '{}'::jsonb,
   created_at timestamp without time zone DEFAULT now(),
   active boolean DEFAULT true,
   CONSTRAINT peers_pkey PRIMARY KEY (id),
@@ -52,10 +56,32 @@ CREATE TABLE IF NOT EXISTS public.servers
   id text NOT NULL,
   name text NOT NULL,
   ip text NOT NULL,
+  host text,
   location text,
+  role text DEFAULT 'edge'::text,
+  country_code text,
+  provider text,
+  status text DEFAULT 'online'::text,
+  enabled boolean DEFAULT true,
   is_default boolean DEFAULT false,
   created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT servers_pkey PRIMARY KEY (id)
+);
+
+CREATE TABLE IF NOT EXISTS public.routes
+(
+  id text NOT NULL,
+  name text NOT NULL,
+  entry_server_id text NOT NULL,
+  exit_server_id text NOT NULL,
+  protocol text DEFAULT 'managed-vpn'::text,
+  profile_format text DEFAULT 'json'::text,
+  enabled boolean DEFAULT true,
+  is_default boolean DEFAULT false,
+  created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT routes_pkey PRIMARY KEY (id),
+  CONSTRAINT routes_entry_server_id_fkey FOREIGN KEY (entry_server_id) REFERENCES public.servers(id),
+  CONSTRAINT routes_exit_server_id_fkey FOREIGN KEY (exit_server_id) REFERENCES public.servers(id)
 );
 
 CREATE TABLE IF NOT EXISTS public.peer_logs
@@ -70,6 +96,28 @@ CREATE TABLE IF NOT EXISTS public.peer_logs
   created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT peer_logs_pkey PRIMARY KEY (id),
   CONSTRAINT peer_logs_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
+);
+
+CREATE TABLE IF NOT EXISTS public.access_profiles
+(
+  id integer NOT NULL DEFAULT nextval('access_profiles_id_seq'::regclass),
+  user_id integer NOT NULL,
+  route_id text NOT NULL,
+  server_id text,
+  profile_name text NOT NULL,
+  profile_token text,
+  protocol text DEFAULT 'managed-vpn'::text,
+  profile_format text DEFAULT 'json'::text,
+  access_uri text,
+  config_payload jsonb DEFAULT '{}'::jsonb,
+  provider_meta jsonb DEFAULT '{}'::jsonb,
+  active boolean DEFAULT true,
+  created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  revoked_at timestamp without time zone,
+  CONSTRAINT access_profiles_pkey PRIMARY KEY (id),
+  CONSTRAINT access_profiles_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id),
+  CONSTRAINT access_profiles_route_id_fkey FOREIGN KEY (route_id) REFERENCES public.routes(id),
+  CONSTRAINT access_profiles_server_id_fkey FOREIGN KEY (server_id) REFERENCES public.servers(id)
 );
 
 -- FK users -> tariffs
@@ -94,9 +142,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS peers_name_uq ON public.peers (name);
 CREATE INDEX IF NOT EXISTS peers_user_id_idx ON public.peers (user_id);
 CREATE INDEX IF NOT EXISTS peers_server_id_idx ON public.peers (server_id);
 CREATE INDEX IF NOT EXISTS peer_logs_user_id_idx ON public.peer_logs (user_id);
+CREATE INDEX IF NOT EXISTS access_profiles_user_id_idx ON public.access_profiles (user_id);
+CREATE INDEX IF NOT EXISTS access_profiles_route_id_idx ON public.access_profiles (route_id);
+CREATE INDEX IF NOT EXISTS access_profiles_server_id_idx ON public.access_profiles (server_id);
+CREATE UNIQUE INDEX IF NOT EXISTS access_profiles_profile_name_uq ON public.access_profiles (profile_name);
 CREATE UNIQUE INDEX IF NOT EXISTS servers_name_uq ON public.servers (name);
 CREATE UNIQUE INDEX IF NOT EXISTS servers_ip_uq ON public.servers (ip);
 CREATE UNIQUE INDEX IF NOT EXISTS tariffs_name_uq ON public.tariffs (name);
+CREATE UNIQUE INDEX IF NOT EXISTS routes_name_uq ON public.routes (name);
 
 -- Example seed (optional)
 -- INSERT INTO public.servers (id, name, ip, location, is_default)
