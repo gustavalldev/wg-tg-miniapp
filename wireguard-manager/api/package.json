@@ -1,7 +1,7 @@
 {
-  "name": "wireguard-manager-api",
+  "name": "vpn-manager-api",
   "version": "1.0.0",
-  "description": "Simple WireGuard Manager API",
+  "description": "Generic VPN access profile API",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -18,8 +18,9 @@
     "nodemon": "^3.0.1"
   },
   "keywords": [
-    "wireguard",
     "vpn",
+    "profile",
+    "telegram",
     "api"
   ],
   "author": "",
