@@ -1,6 +1,6 @@
 # VPN Guard Mini App
 
-🚀 **Telegram бот + Mini App для управления WireGuard VPN**
+🚀 **Telegram бот + Mini App для управления VPN access profiles**
 
 Полноценная система управления VPN‑доступом через Telegram Bot и Mini App.
 
@@ -24,35 +24,35 @@
 ### 📱 Telegram Mini App (React)
 - Управление VPN профилем
 - Выбор сервера (основной)
-- Создание peer и скачивание конфига
+- Создание профиля доступа и скачивание профиля
 - Управление подключениями
-- Админка (пользователи, пиры, рассылка)
+- Админка (пользователи, профили, рассылка)
 
 ### 🔧 API
-- REST API для управления WireGuard
-- Bash скрипты для работы с конфигурациями
-- Автоматическая генерация ключей
+- REST API для управления профилями доступа
+- Хранение профилей в PostgreSQL
+- Выдача JSON/URI профилей для внешнего backend
 
 ## 🏗️ Архитектура
 
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│  Telegram Bot   │    │ Telegram Mini App│    │  WireGuard API  │
+│  Telegram Bot   │    │ Telegram Mini App│    │   VPN API       │
 │                 │    │                  │    │                 │
 │  - /start       │    │  - UI            │    │  - /api/peers   │
 │  - /help        │    │  - VPN actions   │    │  - /health      │
-│  - WebApp Btn   │    │  - Admin tools   │    │  - Bash Scripts │
+│  - WebApp Btn   │    │  - Admin tools   │    │  - Profile API  │
 └─────────────────┘    └──────────────────┘    └─────────────────┘
          │                       │                       │
          └───────────────────────┼───────────────────────┘
                                  │
                     ┌─────────────────┐
-                    │  WireGuard      │
-                    │  Server         │
+                    │ External VPN    │
+                    │ Backend         │
                     │                 │
-                    │  - wg0          │
-                    │  - Peer Configs │
-                    │  - VPN Tunnel   │
+                    │  - Access URI   │
+                    │  - JSON Profile │
+                    │  - Gateway      │
                     └─────────────────┘
 ```
 
@@ -61,7 +61,7 @@
 ### Требования
 - Docker и Docker Compose
 - Telegram Bot Token
-- WireGuard сервер (для продакшена)
+- VPN backend или gateway для продакшена
 
 ### Локальный запуск (демо)
 
@@ -107,16 +107,16 @@ TELEGRAM_TOKEN=1234567890:ABCdefGHIjklMNOpqrsTUVwxyz
 
 Для разработки локально нужен HTTPS‑туннель (например, `ngrok` или `cloudflared`), чтобы Telegram мог открыть Mini App.
 
-### WireGuard API
+### VPN API
 
 API автоматически настраивается при запуске контейнеров.
 
 **Доступные эндпоинты:**
-- `GET /health` - проверка статуса
+- `GET /api/diagnostics` - проверка статуса
 - `GET /api/peers` - список peer'ов
-- `POST /api/peers` - создание peer'а
-- `DELETE /api/peers/:name` - удаление peer'а
-- `GET /api/peers/:name/config` - конфигурация peer'а
+- `POST /api/webapp/connect` - создание профиля
+- `POST /api/webapp/remove` - удаление профиля
+- `GET /api/peers/:name/config` - скачивание профиля
 
 ## 📱 Использование
 
@@ -130,7 +130,7 @@ API автоматически настраивается при запуске 
 
 **Функции:**
 - Просмотр статуса аккаунта
-- Создание VPN и скачивание конфига
+- Создание VPN профиля и скачивание файла профиля
 - Управление подключениями
 
 ## 🌐 Деплой
@@ -143,8 +143,7 @@ API автоматически настраивается при запуске 
 sudo apt update
 sudo apt install docker.io docker-compose git
 
-# Настройте WireGuard
-sudo apt install wireguard
+# Подготовьте ваш VPN backend или gateway
 ```
 
 2. **Клонируйте проект:**
@@ -166,10 +165,10 @@ docker-compose up -d
 
 ### Разделение на серверы
 
-**VPN Server:**
-- Только WireGuard
-- Порт 51820/UDP
-- Публичный IP
+**VPN/Gateway Server:**
+- Ваш внешний backend
+- Публичный IP или gateway
+- Совместимый с выдаваемым профилем
 
 **Control Server:**
 - Telegram Bot
@@ -191,9 +190,8 @@ vpn_bot/
 │   ├── client/
 │   ├── package.json
 │   └── Dockerfile
-├── wireguard-manager/     # API и скрипты
+├── wireguard-manager/     # API профилей доступа
 │   ├── api/
-│   ├── scripts/
 │   └── README.md
 ├── docker-compose.yml     # Оркестрация
 ├── .env.example          # Пример переменных

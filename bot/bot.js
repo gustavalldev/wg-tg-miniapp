@@ -85,7 +85,7 @@ async function isUserSubscribed(telegramId) {
         return ['creator', 'administrator', 'member'].includes(status);
     } catch (err) {
         console.error('Ошибка проверки подписки:', err.message);
-        return false;
+        return true;
     }
 }
 
@@ -114,7 +114,7 @@ bot.start(async (ctx) => {
                     '🔓 Доступ ко всем социальным сетям\n' +
                     '🕒 Работает 24/7\n' +
                     '🚀 Быстрая скорость\n\n' +
-                    'Откройте приложение для управления VPN.',
+                    'Откройте приложение для управления профилем доступа.',
                 ...mainMenuMarkup
             }
         );
@@ -147,9 +147,20 @@ function handleTelegramError(err, ctx) {
     }
 }
 
-bot.telegram.setMyCommands([
-    { command: 'start', description: 'Открыть приложение' },
-    { command: 'help', description: 'Поддержка' }
-]);
+async function startBot() {
+    try {
+        await bot.telegram.setMyCommands([
+            { command: 'start', description: 'Открыть приложение' },
+            { command: 'help', description: 'Поддержка' }
+        ]);
+    } catch (err) {
+        console.error('Не удалось обновить команды бота:', err.message);
+    }
 
-bot.launch();
+    await bot.launch();
+}
+
+startBot().catch((err) => {
+    console.error('Не удалось запустить бота:', err);
+    process.exit(1);
+});

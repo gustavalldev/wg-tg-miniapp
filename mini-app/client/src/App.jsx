@@ -17,12 +17,12 @@ function formatDate(value) {
   return date.toLocaleDateString('ru-RU');
 }
 
-function downloadConfigFile(config, peerName) {
-  const blob = new Blob([config], { type: 'text/plain' });
+function downloadConfigFile(config, fileName = 'vpn-profile.json', mimeType = 'application/json') {
+  const blob = new Blob([config], { type: mimeType });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = `wg-${peerName}.conf`;
+  link.download = fileName;
   document.body.appendChild(link);
   link.click();
   link.remove();
@@ -182,8 +182,8 @@ export default function App() {
         dev: Boolean(tgContext.isLocalDev),
         server_id: selectedServerId || null
       });
-      if (result?.config && result?.peer?.name) {
-        downloadConfigFile(result.config, result.peer.name);
+      if (result?.config) {
+        downloadConfigFile(result.config, result.download_name, result.mime_type);
       }
       await loadProfile();
     } catch (err) {
@@ -213,8 +213,8 @@ export default function App() {
         initData: tgContext.webApp.initData || null,
         dev: Boolean(tgContext.isLocalDev)
       });
-      if (result?.config && result?.peer?.name) {
-        downloadConfigFile(result.config, result.peer.name);
+      if (result?.config) {
+        downloadConfigFile(result.config, result.download_name, result.mime_type);
       }
       await loadProfile();
     } catch (err) {
@@ -272,8 +272,8 @@ export default function App() {
         dev: Boolean(tgContext.isLocalDev),
         name
       });
-      if (result?.config && result?.peer?.name) {
-        downloadConfigFile(result.config, result.peer.name);
+      if (result?.config) {
+        downloadConfigFile(result.config, result.download_name, result.mime_type);
       }
     } catch (err) {
       setError(err.message);
@@ -357,7 +357,7 @@ export default function App() {
 
           <section className="card">
             <h2>Подключение</h2>
-            <p className="muted">Сначала выберите сервер, затем создайте VPN‑профиль.</p>
+            <p className="muted">Сначала выберите сервер, затем создайте профиль доступа.</p>
             <div className="server-select">
               <label className="label">VPN сервер</label>
               <select
@@ -378,7 +378,7 @@ export default function App() {
                 onClick={handleConnect}
                 disabled={Boolean(peer) || !selectedServerId}
               >
-                Подключить VPN
+                Создать профиль
               </button>
             </div>
           </section>
@@ -388,10 +388,14 @@ export default function App() {
             {!peer && <p className="muted">У вас пока нет активных подключений.</p>}
             {peer && (
               <div className="admin-item">
-                <div><strong>{peer.name}</strong> ({peer.ip || '—'})</div>
+                <div>
+                  <strong>{peer.name}</strong> ({peer.protocol || 'VPN'})
+                  <br />
+                  Идентификатор: {peer.ip || '—'}
+                </div>
                 <div className="admin-actions">
-                  <button className="button button--secondary" onClick={handleDownload}>Скачать конфиг</button>
-                  <button className="button button--secondary" onClick={handleRemove}>Удалить VPN</button>
+                  <button className="button button--secondary" onClick={handleDownload}>Скачать профиль</button>
+                  <button className="button button--secondary" onClick={handleRemove}>Удалить профиль</button>
                 </div>
               </div>
             )}
@@ -418,6 +422,7 @@ export default function App() {
                   <span className="muted">({server.ip})</span>
                 </div>
                 {server.location && <div>Регион: {server.location}</div>}
+                <div>Протокол: {server.protocol || 'VPN'}</div>
                 <div>Статус: {server.status}</div>
               </div>
             ))}
@@ -473,11 +478,15 @@ export default function App() {
               {peers.length === 0 && <span className="muted">Нет данных</span>}
               {peers.map(peerItem => (
                 <div key={peerItem.name} className="admin-item">
-                  <div><strong>{peerItem.name}</strong> ({peerItem.ip || '—'})</div>
+                  <div>
+                    <strong>{peerItem.name}</strong> ({peerItem.protocol || 'VPN'})
+                    <br />
+                    Идентификатор: {peerItem.ip || '—'}
+                  </div>
                   <div>Пользователь: @{peerItem.username || '—'} ({peerItem.telegram_id || '—'})</div>
                   <div className="admin-actions">
-                    <button className="button button--secondary" onClick={() => handleDeletePeer(peerItem.name)}>Удалить пир</button>
-                    <button className="button button--secondary" onClick={() => handleDownloadPeer(peerItem.name)}>Скачать конфиг</button>
+                    <button className="button button--secondary" onClick={() => handleDeletePeer(peerItem.name)}>Удалить профиль</button>
+                    <button className="button button--secondary" onClick={() => handleDownloadPeer(peerItem.name)}>Скачать профиль</button>
                   </div>
                 </div>
               ))}
@@ -506,12 +515,12 @@ export default function App() {
           <section className="card">
             <h2>Инструкция</h2>
             <ol className="instructions">
-              <li>Скачайте клиент WireGuard для своего устройства.</li>
-              <li>Сгенерируйте файл подключения и сохраните на устройство.</li>
-              <li>Откройте WireGuard → + → создать из файла → выберите сохраненный файл.</li>
-              <li>Включите VPN и пользуйтесь.</li>
+              <li>Выберите сервер и создайте профиль доступа.</li>
+              <li>Скачайте выданный JSON или URI-профиль.</li>
+              <li>Импортируйте профиль в клиентское приложение, которое будет работать с вашим backend.</li>
+              <li>После импорта включите подключение в клиенте.</li>
             </ol>
-            <a className="link" href="https://www.wireguard.com/install/" target="_blank" rel="noreferrer">WireGuard: установка</a>
+            <p className="muted">Формат профиля зависит от того, какой VPN backend подключён на серверной стороне.</p>
           </section>
         </>
       )}

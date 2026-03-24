@@ -1,151 +1,89 @@
-# WireGuard Manager
+# VPN Manager
 
-Простой менеджер для управления WireGuard VPN через API.
+Этот модуль больше не управляет `wg0` и не вызывает `wg`. Теперь он хранит и отдаёт управляемые access profiles, которые можно привязать к любому внешнему VPN backend.
 
-## Структура проекта
+## Что делает сервис
 
-```
+- авторизует Telegram WebApp;
+- проверяет подписку на канал;
+- создаёт один профиль доступа на пользователя;
+- хранит профиль в PostgreSQL;
+- отдаёт профиль в виде JSON или URI через API.
+
+## Структура
+
+```bash
 wireguard-manager/
-├── scripts/
-│   └── wg-manager.sh      # Bash-скрипт для управления WireGuard
 ├── api/
-│   ├── server.js          # HTTP API сервер
-│   └── package.json       # Зависимости Node.js
-├── config/                # Конфигурационные файлы
+│   ├── server.js
+│   ├── Dockerfile
+│   └── package.json
 └── README.md
 ```
 
-## Установка
+## Переменные окружения
 
-### 1. Установите зависимости
+- `PORT`
+- `PG_HOST`, `PG_PORT`, `PG_DATABASE`, `PG_USER`, `PG_PASSWORD`
+- `TELEGRAM_TOKEN`
+- `CHANNEL_USERNAME`
+- `SERVER_IP`
+- `SERVERS_JSON`
+- `VPN_PROTOCOL_LABEL`
+- `VPN_PROFILE_FORMAT`
+- `VPN_ACCESS_SCHEME`
+- `VPN_ACCESS_PORT`
+- `VPN_PROFILE_TEMPLATE_JSON`
+- `VPN_PROVIDER_MODE`
+- `VPN_BACKEND_URL`
+- `VPN_BACKEND_TOKEN`
+- `VPN_BACKEND_TIMEOUT_MS`
+
+## Быстрый старт
 
 ```bash
-# В папке api
-cd api
+cd wireguard-manager/api
 npm install
-```
-
-### 2. Настройте WireGuard
-
-Убедитесь, что WireGuard установлен и настроен на сервере:
-
-```bash
-# Установка WireGuard (Ubuntu/Debian)
-sudo apt update
-sudo apt install wireguard
-
-# Создание ключей сервера
-wg genkey | sudo tee /etc/wireguard/private.key
-sudo cat /etc/wireguard/private.key | wg pubkey | sudo tee /etc/wireguard/public.key
-```
-
-### 3. Создайте базовый конфиг WireGuard
-
-```bash
-sudo nano /etc/wireguard/wg0.conf
-```
-
-```ini
-[Interface]
-PrivateKey = <ваш_приватный_ключ_сервера>
-Address = 10.8.0.1/24
-ListenPort = 51820
-SaveConfig = true
-
-# Включаем IP forwarding
-PostUp = iptables -A FORWARD -i wg0 -j ACCEPT; iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
-PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE
-```
-
-### 4. Запустите WireGuard
-
-```bash
-sudo wg-quick up wg0
-```
-
-### 5. Сделайте скрипт исполняемым
-
-```bash
-chmod +x scripts/wg-manager.sh
-```
-
-## Использование
-
-### Запуск API сервера
-
-```bash
-cd api
 npm start
 ```
 
-API будет доступен на `http://localhost:3000`
+## Основные endpoints
 
-### API Endpoints
+- `POST /api/webapp/auth`
+- `POST /api/webapp/connect`
+- `POST /api/webapp/remove`
+- `POST /api/webapp/config`
+- `POST /api/webapp/admin/*`
+- `GET /api/servers`
+- `GET /api/diagnostics`
 
-#### Создание peer
-```bash
-POST /api/peers
-Content-Type: application/json
+## Следующий шаг
 
+Сервис уже поддерживает 2 режима:
+
+- `VPN_PROVIDER_MODE=local-template` - локальная генерация JSON/URI профиля
+- `VPN_PROVIDER_MODE=remote-http` - вызов внешнего backend по `POST /provision` и `POST /revoke`
+
+Для `remote-http` ожидается контракт:
+
+```json
+POST /provision
 {
-  "name": "user123",
-  "ip": "10.8.0.2"
+  "profile": { "name": "user-1", "id": "server-1-abcd", "token": "..." },
+  "server": { "id": "server-1" },
+  "user": { "id": 123456789, "username": "kirill" }
 }
 ```
 
-#### Удаление peer
-```bash
-DELETE /api/peers/user123
+Ответ:
+
+```json
+{
+  "protocol": "Managed VPN",
+  "profile_format": "json",
+  "access_uri": "vpn://...",
+  "config_payload": {},
+  "download_name": "user-1.json",
+  "meta": {}
+}
 ```
-
-#### Получение конфига
-```bash
-GET /api/peers/user123/config
-```
-
-#### Список всех peer'ов
-```bash
-GET /api/peers
-```
-
-#### Проверка здоровья
-```bash
-GET /health
-```
-
-## Интеграция с Telegram-ботом
-
-Обновите ваш Telegram-бот для работы с новым API:
-
-```javascript
-const axios = require('axios');
-
-// Создание peer
-const createPeer = async (name, ip) => {
-  const response = await axios.post('http://localhost:3000/api/peers', {
-    name,
-    ip
-  });
-  return response.data.config;
-};
-
-// Удаление peer
-const removePeer = async (name) => {
-  await axios.delete(`http://localhost:3000/api/peers/${name}`);
-};
-```
-
-## Безопасность
-
-- API работает только локально (localhost)
-- Для продакшена добавьте аутентификацию
-- Используйте HTTPS в продакшене
-- Ограничьте доступ к скриптам
-
-## Требования
-
-- Linux сервер
-- WireGuard
-- Node.js 14+
-- Bash
-- jq (для парсинга JSON) 
