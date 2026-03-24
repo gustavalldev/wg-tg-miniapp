@@ -156,7 +156,9 @@ async function checkTelegramSubscription(userId) {
     };
   } catch (error) {
     console.error('Ошибка проверки подписки:', error.message);
-    return { subscribed: false, status: 'error' };
+    // Telegram can be intermittently unreachable from the control server.
+    // Fail open here to avoid blocking WebApp auth and profile issuance.
+    return { subscribed: true, status: 'error-open' };
   }
 }
 

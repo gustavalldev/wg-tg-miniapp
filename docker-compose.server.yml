@@ -1,0 +1,88 @@
+version: '3.8'
+
+services:
+  telegram-bot:
+    build: ./bot
+    container_name: vpnbot-ru-telegram-bot
+    environment:
+      - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
+      - PG_HOST=${PG_HOST}
+      - PG_PORT=${PG_PORT}
+      - PG_DATABASE=${PG_DATABASE}
+      - PG_USER=${PG_USER}
+      - PG_PASSWORD=${PG_PASSWORD}
+      - CHANNEL_USERNAME=${CHANNEL_USERNAME}
+      - WEBAPP_URL=${WEBAPP_URL}
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
+  vpn-api:
+    build:
+      context: ./wireguard-manager
+      dockerfile: api/Dockerfile
+    container_name: vpnbot-ru-vpn-api
+    environment:
+      - PORT=3010
+      - SERVER_IP=${SERVER_IP}
+      - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
+      - CHANNEL_USERNAME=${CHANNEL_USERNAME}
+      - ADMIN_USERNAMES=${ADMIN_USERNAMES}
+      - SERVERS_JSON=${SERVERS_JSON}
+      - VPN_PROTOCOL_LABEL=${VPN_PROTOCOL_LABEL}
+      - VPN_PROFILE_FORMAT=${VPN_PROFILE_FORMAT}
+      - VPN_ACCESS_SCHEME=${VPN_ACCESS_SCHEME}
+      - VPN_ACCESS_PORT=${VPN_ACCESS_PORT}
+      - VPN_PROFILE_TEMPLATE_JSON=${VPN_PROFILE_TEMPLATE_JSON}
+      - VPN_PROVIDER_MODE=${VPN_PROVIDER_MODE}
+      - VPN_BACKEND_URL=${VPN_BACKEND_URL}
+      - VPN_BACKEND_TOKEN=${VPN_BACKEND_TOKEN}
+      - VPN_BACKEND_TIMEOUT_MS=${VPN_BACKEND_TIMEOUT_MS}
+      - PG_HOST=${PG_HOST}
+      - PG_PORT=${PG_PORT}
+      - PG_DATABASE=${PG_DATABASE}
+      - PG_USER=${PG_USER}
+      - PG_PASSWORD=${PG_PASSWORD}
+    ports:
+      - "3110:3010"
+    depends_on:
+      - vpn-backend
+      - postgres
+    restart: unless-stopped
+
+  vpn-backend:
+    build:
+      context: ./vpn-backend
+    container_name: vpnbot-ru-vpn-backend
+    environment:
+      - VPN_BACKEND_PORT=3020
+      - VPN_BACKEND_PROTOCOL=${VPN_BACKEND_PROTOCOL}
+      - VPN_BACKEND_PROFILE_FORMAT=${VPN_BACKEND_PROFILE_FORMAT}
+      - VPN_BACKEND_NODES_JSON=${VPN_BACKEND_NODES_JSON}
+    restart: unless-stopped
+
+  mini-app:
+    container_name: vpnbot-ru-mini-app
+    build:
+      context: ./mini-app
+      args:
+        VITE_API_BASE: ${VITE_API_BASE}
+        VITE_CHANNEL_USERNAME: ${VITE_CHANNEL_USERNAME}
+    ports:
+      - "3112:3002"
+    environment:
+      - MINI_APP_PORT=3002
+    depends_on:
+      - vpn-api
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:15
+    container_name: vpnbot-ru-postgres
+    restart: always
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
