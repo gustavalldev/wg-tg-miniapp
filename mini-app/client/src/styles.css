@@ -193,6 +193,49 @@ body {
   color: #c13737;
 }
 
+.status-pill--pending {
+  background: #fff4dd;
+  color: #a36a00;
+}
+
+.billing-alert {
+  margin: 0;
+  color: #b03a2e;
+  font-weight: 600;
+}
+
+.billing-note {
+  margin: 0;
+  color: #44506a;
+}
+
+.plan-list {
+  display: grid;
+  gap: 12px;
+}
+
+.plan-card {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid #e6eaf2;
+  border-radius: 14px;
+  background: #fbfcff;
+}
+
+.plan-card__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.plan-price {
+  font-size: 20px;
+  font-weight: 700;
+}
+
 .textarea {
   width: 100%;
   border: 1px solid #e1e4eb;

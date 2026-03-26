@@ -5,9 +5,11 @@ const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3000';
 
 const defaultProfile = {
   tariff_name: null,
+  tariff_code: null,
   connections_count: 0,
   tariff_expiry: null,
-  vpn_status: 'active'
+  vpn_status: 'active',
+  has_active_access: true
 };
 
 function formatDate(value) {
@@ -32,6 +34,16 @@ function normalizeServerStatus(status) {
     return { label: 'Активен', tone: 'online' };
   }
   return { label: 'Недоступен', tone: 'offline' };
+}
+
+function formatPrice(value) {
+  return new Intl.NumberFormat('ru-RU').format(Number(value || 0));
+}
+
+function normalizePaymentStatus(status) {
+  if (status === 'paid') return { label: 'Оплачен', tone: 'online' };
+  if (status === 'rejected') return { label: 'Отклонён', tone: 'offline' };
+  return { label: 'Ожидает', tone: 'pending' };
 }
 
 function downloadConfigFile(config, fileName = 'vpn-profile.json', mimeType = 'application/json') {
@@ -106,6 +118,11 @@ export default function App() {
   const [broadcastMessage, setBroadcastMessage] = useState('');
   const [broadcastStatus, setBroadcastStatus] = useState('');
   const [servers, setServers] = useState([]);
+  const [tariffs, setTariffs] = useState([]);
+  const [referral, setReferral] = useState(null);
+  const [pendingPayment, setPendingPayment] = useState(null);
+  const [payments, setPayments] = useState([]);
+  const [referralInput, setReferralInput] = useState('');
   const [selectedServerId, setSelectedServerId] = useState('');
   const [activeTab, setActiveTab] = useState('home');
   const [tgContext, setTgContext] = useState(null);
@@ -150,6 +167,9 @@ export default function App() {
     setProfile(data.profile || defaultProfile);
     setPeer(data.peer || null);
     setIsAdmin(Boolean(data.is_admin));
+    setTariffs(data.tariffs || []);
+    setReferral(data.referral || null);
+    setPendingPayment(data.pending_payment || null);
     setStatusLine(`Привет, ${data.user?.first_name || 'друг'}!`);
   }
 
@@ -187,6 +207,15 @@ export default function App() {
     setPeers(result.peers || []);
   }
 
+  async function loadAdminPayments() {
+    if (!tgContext) return;
+    const result = await postJson('/api/webapp/admin/payments', {
+      initData: tgContext.webApp.initData || null,
+      dev: Boolean(tgContext.isLocalDev)
+    });
+    setPayments(result.payments || []);
+  }
+
   useEffect(() => {
     if (!tgContext) return;
     loadProfile().catch(err => setError(err.message));
@@ -205,6 +234,7 @@ export default function App() {
     if (tgContext && isAdmin) {
       loadAdminUsers().catch(err => setError(err.message));
       loadAdminPeers().catch(err => setError(err.message));
+      loadAdminPayments().catch(err => setError(err.message));
     }
   }, [tgContext, isAdmin]);
 
@@ -279,6 +309,55 @@ export default function App() {
     }
 
     window.location.href = peer.access_uri;
+  }
+
+  async function handleCreatePayment(tariffCode) {
+    try {
+      const result = await postJson('/api/webapp/payments/create', {
+        initData: tgContext.webApp.initData || null,
+        dev: Boolean(tgContext.isLocalDev),
+        tariff_code: tariffCode
+      });
+      setPendingPayment(result.payment || null);
+      setStatusLine(result.instructions || 'Заявка на оплату создана.');
+      await loadProfile();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function handleApplyReferral() {
+    if (!referralInput.trim()) {
+      setError('Введите referral code.');
+      return;
+    }
+
+    try {
+      const result = await postJson('/api/webapp/apply-referral', {
+        initData: tgContext.webApp.initData || null,
+        dev: Boolean(tgContext.isLocalDev),
+        referral_code: referralInput.trim()
+      });
+      setReferral(result.referral || null);
+      setReferralInput('');
+      setStatusLine('Реферальный код применён');
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function handleCopyReferralLink() {
+    if (!referral?.invite_link) {
+      setError('Реферальная ссылка недоступна.');
+      return;
+    }
+
+    try {
+      await copyToClipboard(referral.invite_link);
+      setStatusLine('Реферальная ссылка скопирована');
+    } catch (_err) {
+      setError('Не удалось скопировать реферальную ссылку.');
+    }
   }
 
   async function handleBan(telegramId) {
@@ -362,6 +441,33 @@ export default function App() {
     }
   }
 
+  async function handleApprovePayment(paymentId) {
+    try {
+      await postJson('/api/webapp/admin/approve-payment', {
+        initData: tgContext.webApp.initData || null,
+        dev: Boolean(tgContext.isLocalDev),
+        payment_id: Number(paymentId)
+      });
+      await loadAdminPayments();
+      await loadAdminUsers();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function handleRejectPayment(paymentId) {
+    try {
+      await postJson('/api/webapp/admin/reject-payment', {
+        initData: tgContext.webApp.initData || null,
+        dev: Boolean(tgContext.isLocalDev),
+        payment_id: Number(paymentId)
+      });
+      await loadAdminPayments();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
   if (!tgContext) {
     return (
       <div className="app">
@@ -406,11 +512,21 @@ export default function App() {
           <section className="card">
             <h2>Ваш аккаунт</h2>
             <div className="info">
-              {'Тариф: ' + (profile.tariff_name || 'Пробный период')}
+              {'Тариф: ' + (profile.tariff_name || 'Без тарифа')}
               {'\nПодключений: ' + (profile.connections_count ?? 0)}
-              {'\nБлижайшая оплата: ' + formatDate(profile.tariff_expiry)}
+              {'\nДействует до: ' + formatDate(profile.tariff_expiry)}
               {'\nVPN статус: ' + (profile.vpn_status || 'active')}
             </div>
+            {!profile.has_active_access && (
+              <p className="billing-alert">
+                Доступ истёк. Выберите тариф ниже, чтобы снова включить VPN.
+              </p>
+            )}
+            {profile.tariff_code === 'trial-30d' && profile.has_active_access && (
+              <p className="billing-note">
+                У новых пользователей первый месяц бесплатный. После этого понадобится платный тариф.
+              </p>
+            )}
           </section>
 
           <section className="card">
@@ -434,10 +550,66 @@ export default function App() {
               <button
                 className="button"
                 onClick={handleConnect}
-                disabled={Boolean(peer) || !selectedServerId}
+                disabled={Boolean(peer) || !selectedServerId || !profile.has_active_access}
               >
                 Создать профиль
               </button>
+            </div>
+          </section>
+
+          <section className="card">
+            <h2>Тарифы</h2>
+            <div className="plan-list">
+              {tariffs.filter(tariff => tariff.code !== 'trial-30d').map(tariff => (
+                <div key={tariff.code} className="plan-card">
+                  <div>
+                    <strong>{tariff.name}</strong>
+                    <div className="muted">{tariff.description}</div>
+                  </div>
+                  <div className="plan-card__footer">
+                    <span className="plan-price">{formatPrice(tariff.price)} ₽</span>
+                    <button
+                      className="button button--secondary"
+                      onClick={() => handleCreatePayment(tariff.code)}
+                    >
+                      Выбрать
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {pendingPayment && (
+              <p className="billing-note">
+                Заявка #{pendingPayment.id} на тариф {pendingPayment.tariff_name} уже создана. Для подтверждения оплаты напишите в поддержку.
+              </p>
+            )}
+          </section>
+
+          <section className="card">
+            <h2>Реферальная программа</h2>
+            <p className="muted">
+              За первую оплаченную подписку приглашённого пользователя вы оба получите по {referral?.reward_days || 7} дней доступа.
+            </p>
+            {referral?.invite_link && (
+              <div className="admin-actions">
+                <button className="button button--secondary" onClick={handleCopyReferralLink}>Скопировать referral link</button>
+              </div>
+            )}
+            {referral && (
+              <div className="info">
+                {'Код: ' + (referral.code || '—')}
+                {'\nПриглашено: ' + (referral.invited_total ?? 0)}
+                {'\nНаград начислено: ' + (referral.rewarded_total ?? 0)}
+              </div>
+            )}
+            <div className="admin-controls">
+              <input
+                className="input"
+                placeholder="Ввести referral code"
+                value={referralInput}
+                onChange={(event) => setReferralInput(event.target.value)}
+              />
+              <button className="button button--secondary" onClick={handleApplyReferral}>Применить</button>
             </div>
           </section>
 
@@ -465,7 +637,7 @@ export default function App() {
 
           <section className="card">
             <h2>Поддержка</h2>
-            <p>Если есть вопросы — пишите в поддержку.</p>
+            <p>Если есть вопросы по доступу или оплате, пишите в поддержку.</p>
             <a className="link" href="https://t.me/kkasyanov" target="_blank" rel="noreferrer">@kkasyanov</a>
           </section>
         </>
@@ -516,6 +688,7 @@ export default function App() {
               {users.map(user => (
                 <div key={user.telegram_id} className="admin-item">
                   <div><strong>@{user.username || '—'}</strong> (id: {user.telegram_id})</div>
+                  <div>Тариф: {user.tariff_name || '—'}</div>
                   <div>Статус: {user.vpn_status || 'active'}</div>
                   <div className="admin-actions">
                     <button className="button button--secondary" onClick={() => handleBan(user.telegram_id)}>Забанить</button>
@@ -555,6 +728,37 @@ export default function App() {
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+
+          <div className="admin-section">
+            <h3>Платежи</h3>
+            <div className="admin-actions">
+              <button className="button button--secondary" onClick={loadAdminPayments}>Обновить платежи</button>
+            </div>
+            <div className="admin-list">
+              {payments.length === 0 && <span className="muted">Нет данных</span>}
+              {payments.map(payment => {
+                const status = normalizePaymentStatus(payment.status);
+                return (
+                  <div key={payment.id} className="admin-item">
+                    <div className="server-row">
+                      <strong>Заявка #{payment.id}</strong>
+                      <span className={`status-pill status-pill--${status.tone}`}>{status.label}</span>
+                    </div>
+                    <div>@{payment.username || '—'} ({payment.telegram_id})</div>
+                    <div>Тариф: {payment.tariff_name}</div>
+                    <div>Сумма: {formatPrice(payment.amount)} ₽</div>
+                    <div className="muted">Создано: {formatDate(payment.created_at)}</div>
+                    {payment.status === 'pending' && (
+                      <div className="admin-actions">
+                        <button className="button button--secondary" onClick={() => handleApprovePayment(payment.id)}>Подтвердить</button>
+                        <button className="button button--secondary" onClick={() => handleRejectPayment(payment.id)}>Отклонить</button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
 

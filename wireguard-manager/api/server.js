@@ -29,6 +29,11 @@ const VPN_PROVIDER_MODE = process.env.VPN_PROVIDER_MODE || 'local-template';
 const VPN_BACKEND_URL = process.env.VPN_BACKEND_URL || '';
 const VPN_BACKEND_TOKEN = process.env.VPN_BACKEND_TOKEN || '';
 const VPN_BACKEND_TIMEOUT_MS = parseInt(process.env.VPN_BACKEND_TIMEOUT_MS || '10000', 10);
+const TRIAL_TARIFF_CODE = process.env.TRIAL_TARIFF_CODE || 'trial-30d';
+const TRIAL_DAYS = parseInt(process.env.TRIAL_DAYS || '30', 10);
+const REFERRAL_REWARD_DAYS = parseInt(process.env.REFERRAL_REWARD_DAYS || '7', 10);
+const PAYMENT_PROVIDER = process.env.PAYMENT_PROVIDER || 'manual';
+const SUPPORT_USERNAME = process.env.SUPPORT_USERNAME || 'kkasyanov';
 
 const pool = new Pool({
   host: process.env.PG_HOST,
@@ -188,6 +193,13 @@ async function ensureSchema() {
     'ALTER TABLE public.servers ADD COLUMN IF NOT EXISTS provider text',
     'ALTER TABLE public.servers ADD COLUMN IF NOT EXISTS status text DEFAULT \'online\'',
     'ALTER TABLE public.servers ADD COLUMN IF NOT EXISTS enabled boolean DEFAULT true',
+    'ALTER TABLE public.users ADD COLUMN IF NOT EXISTS referral_code text',
+    'ALTER TABLE public.users ADD COLUMN IF NOT EXISTS referred_by_user_id integer',
+    'ALTER TABLE public.users ADD COLUMN IF NOT EXISTS referred_at timestamp without time zone',
+    'ALTER TABLE public.users ADD COLUMN IF NOT EXISTS referral_reward_granted_at timestamp without time zone',
+    'ALTER TABLE public.tariffs ADD COLUMN IF NOT EXISTS code text',
+    'ALTER TABLE public.tariffs ADD COLUMN IF NOT EXISTS is_active boolean DEFAULT true',
+    'ALTER TABLE public.tariffs ADD COLUMN IF NOT EXISTS sort_order integer DEFAULT 0',
     `CREATE TABLE IF NOT EXISTS public.routes (
       id text PRIMARY KEY,
       name text NOT NULL,
@@ -215,10 +227,29 @@ async function ensureSchema() {
       created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
       revoked_at timestamp without time zone
     )`,
+    `CREATE TABLE IF NOT EXISTS public.payments (
+      id serial PRIMARY KEY,
+      user_id integer NOT NULL REFERENCES public.users(id),
+      tariff_id integer NOT NULL REFERENCES public.tariffs(id),
+      amount numeric(10,2) NOT NULL,
+      currency text NOT NULL DEFAULT 'RUB',
+      status text NOT NULL DEFAULT 'pending',
+      provider text NOT NULL DEFAULT 'manual',
+      provider_ref text,
+      details jsonb DEFAULT '{}'::jsonb,
+      created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+      paid_at timestamp without time zone,
+      rejected_at timestamp without time zone
+    )`,
     'CREATE UNIQUE INDEX IF NOT EXISTS access_profiles_profile_name_uq ON public.access_profiles (profile_name)',
     'CREATE INDEX IF NOT EXISTS access_profiles_user_id_idx ON public.access_profiles (user_id)',
     'CREATE INDEX IF NOT EXISTS access_profiles_route_id_idx ON public.access_profiles (route_id)',
-    'CREATE UNIQUE INDEX IF NOT EXISTS routes_name_uq ON public.routes (name)'
+    'CREATE UNIQUE INDEX IF NOT EXISTS routes_name_uq ON public.routes (name)',
+    'CREATE UNIQUE INDEX IF NOT EXISTS users_referral_code_uq ON public.users (referral_code)',
+    'CREATE UNIQUE INDEX IF NOT EXISTS tariffs_code_uq ON public.tariffs (code)',
+    'CREATE INDEX IF NOT EXISTS users_referred_by_user_id_idx ON public.users (referred_by_user_id)',
+    'CREATE INDEX IF NOT EXISTS payments_user_id_idx ON public.payments (user_id)',
+    'CREATE INDEX IF NOT EXISTS payments_status_idx ON public.payments (status)'
   ];
 
   for (const statement of statements) {
@@ -227,6 +258,82 @@ async function ensureSchema() {
     } catch (error) {
       console.warn(`Не удалось выполнить миграцию "${statement}": ${error.message}`);
     }
+  }
+
+  await seedTariffs();
+}
+
+async function seedTariffs() {
+  const tariffs = [
+    {
+      code: 'trial-30d',
+      name: 'Пробный период',
+      duration_months: 1,
+      duration_days: TRIAL_DAYS,
+      price: 0,
+      description: `Первый месяц бесплатно`,
+      sort_order: 0
+    },
+    {
+      code: 'plan-1m',
+      name: '1 месяц',
+      duration_months: 1,
+      duration_days: 30,
+      price: 190,
+      description: 'Подписка на 1 месяц',
+      sort_order: 10
+    },
+    {
+      code: 'plan-3m',
+      name: '3 месяца',
+      duration_months: 3,
+      duration_days: 90,
+      price: 490,
+      description: 'Подписка на 3 месяца',
+      sort_order: 20
+    },
+    {
+      code: 'plan-6m',
+      name: '6 месяцев',
+      duration_months: 6,
+      duration_days: 180,
+      price: 990,
+      description: 'Подписка на 6 месяцев',
+      sort_order: 30
+    },
+    {
+      code: 'tester',
+      name: 'tester',
+      duration_months: 0,
+      duration_days: 0,
+      price: 0,
+      description: 'Тестовый тариф',
+      sort_order: 100
+    }
+  ];
+
+  for (const tariff of tariffs) {
+    await pool.query(
+      `INSERT INTO public.tariffs (code, name, duration_months, duration_days, price, description, is_active, sort_order)
+       VALUES ($1, $2, $3, $4, $5, $6, true, $7)
+       ON CONFLICT (code) DO UPDATE
+       SET name = EXCLUDED.name,
+           duration_months = EXCLUDED.duration_months,
+           duration_days = EXCLUDED.duration_days,
+           price = EXCLUDED.price,
+           description = EXCLUDED.description,
+           is_active = EXCLUDED.is_active,
+           sort_order = EXCLUDED.sort_order`,
+      [
+        tariff.code,
+        tariff.name,
+        tariff.duration_months,
+        tariff.duration_days,
+        tariff.price,
+        tariff.description,
+        tariff.sort_order
+      ]
+    );
   }
 }
 
@@ -325,29 +432,316 @@ async function getServersFromDb() {
   return getConfiguredServers();
 }
 
-async function ensureUser(telegramUser) {
-  const existing = await pool.query('SELECT id FROM users WHERE telegram_id = $1', [telegramUser.id]);
-  if (existing.rows.length > 0) {
-    return existing.rows[0].id;
+function makeReferralCode() {
+  return crypto.randomBytes(5).toString('hex');
+}
+
+function computeExpiryFromDays(currentExpiry, durationDays) {
+  const now = new Date();
+  const baseDate = currentExpiry && new Date(currentExpiry) > now ? new Date(currentExpiry) : now;
+  baseDate.setDate(baseDate.getDate() + durationDays);
+  return baseDate;
+}
+
+function isProfileActive(profile) {
+  if (!profile) return false;
+  if (profile.vpn_status === 'blocked') return false;
+  if (profile.tariff_code === 'tester') return true;
+  if (!profile.tariff_expiry) return false;
+  return new Date(profile.tariff_expiry) > new Date();
+}
+
+async function ensureUniqueReferralCode() {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const code = makeReferralCode();
+    const existing = await pool.query('SELECT 1 FROM users WHERE referral_code = $1', [code]);
+    if (existing.rows.length === 0) {
+      return code;
+    }
   }
 
-  const insert = await pool.query(
-    'INSERT INTO users (telegram_id, username) VALUES ($1, $2) RETURNING id',
-    [telegramUser.id, telegramUser.username || null]
+  throw new Error('Не удалось сгенерировать referral code');
+}
+
+async function getTariffByCode(code) {
+  const result = await pool.query(
+    `SELECT id, code, name, duration_months, duration_days, price, description, sort_order
+     FROM tariffs
+     WHERE code = $1
+     LIMIT 1`,
+    [code]
   );
+  return result.rows[0] || null;
+}
+
+async function ensureUser(telegramUser, options = {}) {
+  const existing = await pool.query(
+    'SELECT id, referral_code, referred_by_user_id FROM users WHERE telegram_id = $1',
+    [telegramUser.id]
+  );
+
+  if (existing.rows.length > 0) {
+    const existingUser = existing.rows[0];
+    if (!existingUser.referral_code) {
+      const referralCode = await ensureUniqueReferralCode();
+      await pool.query('UPDATE users SET referral_code = $1 WHERE id = $2', [referralCode, existingUser.id]);
+    }
+
+    if (options.referralCode && !existingUser.referred_by_user_id) {
+      await attachReferral(existingUser.id, options.referralCode);
+    }
+
+    return existingUser.id;
+  }
+
+  const referralCode = await ensureUniqueReferralCode();
+  const trialTariff = await getTariffByCode(TRIAL_TARIFF_CODE);
+  const trialExpiry = computeExpiryFromDays(null, TRIAL_DAYS);
+
+  const insert = await pool.query(
+    `INSERT INTO users (telegram_id, username, tariff_id, tariff_expiry, referral_code, vpn_status)
+     VALUES ($1, $2, $3, $4, $5, 'active')
+     RETURNING id`,
+    [telegramUser.id, telegramUser.username || null, trialTariff?.id || null, trialExpiry, referralCode]
+  );
+
+  if (options.referralCode) {
+    await attachReferral(insert.rows[0].id, options.referralCode);
+  }
+
   return insert.rows[0].id;
 }
 
 async function getUserProfileByTelegramId(telegramId) {
   const res = await pool.query(
-    `SELECT u.id, u.vpn_status, u.tariff_expiry, t.name AS tariff_name,
+    `SELECT u.id, u.vpn_status, u.tariff_expiry, u.referral_code, u.referred_by_user_id, u.referral_reward_granted_at,
+            t.name AS tariff_name, t.code AS tariff_code,
             (SELECT COUNT(*) FROM peers WHERE user_id = u.id AND active = true) AS connections_count
      FROM users u
      LEFT JOIN tariffs t ON u.tariff_id = t.id
      WHERE u.telegram_id = $1`,
     [telegramId]
   );
-  return res.rows[0] || null;
+  const profile = res.rows[0] || null;
+  if (!profile) return null;
+  return {
+    ...profile,
+    has_active_access: isProfileActive(profile)
+  };
+}
+
+async function attachReferral(userId, referralCode) {
+  if (!referralCode) return;
+
+  const sanitizedCode = String(referralCode).trim().toLowerCase().replace(/^ref[_-]?/i, '');
+  if (!sanitizedCode) return;
+
+  const userRes = await pool.query(
+    'SELECT id, referred_by_user_id, referral_code FROM users WHERE id = $1',
+    [userId]
+  );
+  const user = userRes.rows[0];
+  if (!user || user.referred_by_user_id || user.referral_code === sanitizedCode) {
+    return;
+  }
+
+  const referrerRes = await pool.query(
+    'SELECT id FROM users WHERE referral_code = $1 LIMIT 1',
+    [sanitizedCode]
+  );
+  const referrer = referrerRes.rows[0];
+  if (!referrer || referrer.id === userId) {
+    return;
+  }
+
+  const paidPayments = await pool.query(
+    'SELECT 1 FROM payments WHERE user_id = $1 AND status = $2 LIMIT 1',
+    [userId, 'paid']
+  );
+  if (paidPayments.rows.length > 0) {
+    return;
+  }
+
+  await pool.query(
+    `UPDATE users
+     SET referred_by_user_id = $1, referred_at = COALESCE(referred_at, NOW())
+     WHERE id = $2 AND referred_by_user_id IS NULL`,
+    [referrer.id, userId]
+  );
+}
+
+async function getTariffs() {
+  const result = await pool.query(
+    `SELECT id, code, name, duration_months, duration_days, price, description, sort_order
+     FROM tariffs
+     WHERE is_active = true AND code <> 'tester'
+     ORDER BY sort_order, duration_days, price`
+  );
+  return result.rows;
+}
+
+async function getReferralSummary(userId, referralCode) {
+  const [linked, rewarded] = await Promise.all([
+    pool.query(
+      'SELECT COUNT(*)::int AS total FROM users WHERE referred_by_user_id = $1',
+      [userId]
+    ),
+    pool.query(
+      'SELECT COUNT(*)::int AS total FROM users WHERE referred_by_user_id = $1 AND referral_reward_granted_at IS NOT NULL',
+      [userId]
+    )
+  ]);
+
+  return {
+    code: referralCode,
+    invite_link: referralCode ? `https://t.me/VPN_GuardBot?start=ref_${referralCode}` : null,
+    invited_total: linked.rows[0]?.total || 0,
+    rewarded_total: rewarded.rows[0]?.total || 0,
+    reward_days: REFERRAL_REWARD_DAYS
+  };
+}
+
+async function getPendingPayment(userId) {
+  const result = await pool.query(
+    `SELECT p.id, p.amount, p.currency, p.status, p.created_at, t.name AS tariff_name, t.code AS tariff_code
+     FROM payments p
+     JOIN tariffs t ON t.id = p.tariff_id
+     WHERE p.user_id = $1 AND p.status = 'pending'
+     ORDER BY p.created_at DESC
+     LIMIT 1`,
+    [userId]
+  );
+  return result.rows[0] || null;
+}
+
+async function createPaymentRequest(userId, tariffCode) {
+  const tariff = await getTariffByCode(tariffCode);
+  if (!tariff || tariff.code === TRIAL_TARIFF_CODE || tariff.code === 'tester') {
+    throw new Error('Тариф недоступен для оплаты.');
+  }
+
+  const pending = await getPendingPayment(userId);
+  if (pending) {
+    return pending;
+  }
+
+  const result = await pool.query(
+    `INSERT INTO payments (user_id, tariff_id, amount, currency, status, provider, details)
+     VALUES ($1, $2, $3, 'RUB', 'pending', $4, $5)
+     RETURNING id, amount, currency, status, created_at`,
+    [userId, tariff.id, tariff.price, PAYMENT_PROVIDER, JSON.stringify({ tariff_code: tariff.code })]
+  );
+
+  return {
+    ...result.rows[0],
+    tariff_name: tariff.name,
+    tariff_code: tariff.code
+  };
+}
+
+async function applyReferralRewardIfEligible(userId) {
+  const userRes = await pool.query(
+    `SELECT id, referred_by_user_id, referral_reward_granted_at, tariff_expiry
+     FROM users
+     WHERE id = $1`,
+    [userId]
+  );
+  const user = userRes.rows[0];
+  if (!user || !user.referred_by_user_id || user.referral_reward_granted_at) {
+    return;
+  }
+
+  const rewardExpiryForInvitee = computeExpiryFromDays(user.tariff_expiry, REFERRAL_REWARD_DAYS);
+  const referrerRes = await pool.query(
+    'SELECT id, tariff_expiry FROM users WHERE id = $1',
+    [user.referred_by_user_id]
+  );
+  const referrer = referrerRes.rows[0];
+  const rewardExpiryForReferrer = computeExpiryFromDays(referrer?.tariff_expiry || null, REFERRAL_REWARD_DAYS);
+
+  await pool.query(
+    `UPDATE users
+     SET tariff_expiry = $1,
+         referral_reward_granted_at = NOW()
+     WHERE id = $2`,
+    [rewardExpiryForInvitee, user.id]
+  );
+
+  if (referrer) {
+    await pool.query(
+      `UPDATE users
+       SET tariff_expiry = $1
+       WHERE id = $2`,
+      [rewardExpiryForReferrer, referrer.id]
+    );
+  }
+}
+
+async function approvePayment(paymentId) {
+  const paymentRes = await pool.query(
+    `SELECT p.id, p.user_id, p.tariff_id, p.status, t.code AS tariff_code, t.name AS tariff_name, t.duration_days
+     FROM payments p
+     JOIN tariffs t ON t.id = p.tariff_id
+     WHERE p.id = $1
+     LIMIT 1`,
+    [paymentId]
+  );
+  const payment = paymentRes.rows[0];
+  if (!payment) {
+    throw new Error('Платёж не найден.');
+  }
+  if (payment.status !== 'pending') {
+    throw new Error('Платёж уже обработан.');
+  }
+
+  const userRes = await pool.query(
+    'SELECT tariff_expiry FROM users WHERE id = $1 LIMIT 1',
+    [payment.user_id]
+  );
+  const user = userRes.rows[0];
+  const nextExpiry = computeExpiryFromDays(user?.tariff_expiry || null, payment.duration_days || 0);
+
+  await pool.query(
+    `UPDATE users
+     SET tariff_id = $1,
+         tariff_expiry = $2,
+         vpn_status = 'active'
+     WHERE id = $3`,
+    [payment.tariff_id, nextExpiry, payment.user_id]
+  );
+  await pool.query(
+    `UPDATE payments
+     SET status = 'paid', paid_at = NOW()
+     WHERE id = $1`,
+    [payment.id]
+  );
+  await applyReferralRewardIfEligible(payment.user_id);
+}
+
+async function revokePeerAccess(peer, user) {
+  await vpnProvider.revoke({
+    peer,
+    user
+  });
+  await pool.query('UPDATE access_profiles SET active = false, revoked_at = NOW() WHERE profile_name = $1', [peer.name]);
+  await pool.query('DELETE FROM peers WHERE name = $1', [peer.name]);
+}
+
+async function enforceActiveAccess(userDbId, telegramUser, req = null) {
+  const profile = await getUserProfileByTelegramId(telegramUser.id);
+  if (isProfileActive(profile)) {
+    return profile;
+  }
+
+  const peer = await getUserPeerByUserId(userDbId);
+  if (peer) {
+    await revokePeerAccess(peer, telegramUser);
+    if (req) {
+      await logAction(userDbId, peer.name, 'access_revoked_expired', {}, req);
+    }
+  }
+
+  return profile;
 }
 
 function parseConfigPayload(value) {
@@ -545,8 +939,13 @@ app.post('/api/webapp/auth', async (req, res) => {
       ? { subscribed: true, status: 'dev' }
       : await checkTelegramSubscription(result.user.id);
     const userDbId = await ensureUser(result.user);
-    const profile = await getUserProfileByTelegramId(result.user.id);
+    const profile = await enforceActiveAccess(userDbId, result.user);
     const peer = await getUserPeerByUserId(userDbId);
+    const [tariffs, referral, pendingPayment] = await Promise.all([
+      getTariffs(),
+      getReferralSummary(userDbId, profile?.referral_code),
+      getPendingPayment(userDbId)
+    ]);
 
     res.json({
       ok: true,
@@ -560,7 +959,10 @@ app.post('/api/webapp/auth', async (req, res) => {
         protocol: peer.protocol,
         access_uri: peer.access_uri
       } : null,
-      is_admin: isAdminUsername(result.user.username)
+      is_admin: isAdminUsername(result.user.username),
+      tariffs,
+      referral,
+      pending_payment: pendingPayment
     });
   } catch (error) {
     console.error('Ошибка webapp auth:', error.message);
@@ -593,6 +995,13 @@ app.post('/api/webapp/connect', async (req, res) => {
     }
 
     const userDbId = await ensureUser(result.user);
+    const profile = await enforceActiveAccess(userDbId, result.user, req);
+    if (!isProfileActive(profile)) {
+      return res.status(402).json({
+        error: 'Пробный период или подписка истекли. Выберите тариф.',
+        code: 'SUBSCRIPTION_REQUIRED'
+      });
+    }
     const existingPeer = await getUserPeerByUserId(userDbId);
     if (existingPeer) {
       return res.status(400).json({ error: 'У вас уже есть активный профиль доступа.' });
@@ -600,13 +1009,6 @@ app.post('/api/webapp/connect', async (req, res) => {
 
     const peer = await createAccessProfileForUser(userDbId, result.user, req, selectedServer);
     const download = buildDownload(peer);
-
-    await pool.query(
-      `UPDATE users
-       SET tariff_id = (SELECT id FROM tariffs WHERE name = 'tester' LIMIT 1)
-       WHERE telegram_id = $1`,
-      [result.user.id]
-    );
 
     res.json({
       ok: true,
@@ -643,17 +1045,13 @@ app.post('/api/webapp/remove', async (req, res) => {
     }
 
     const userDbId = await ensureUser(result.user);
+    await enforceActiveAccess(userDbId, result.user, req);
     const peer = await getUserPeerByUserId(userDbId);
     if (!peer) {
       return res.status(400).json({ error: 'У вас нет активных VPN-профилей.' });
     }
 
-    await vpnProvider.revoke({
-      peer,
-      user: result.user
-    });
-    await pool.query('UPDATE access_profiles SET active = false, revoked_at = NOW() WHERE profile_name = $1', [peer.name]);
-    await pool.query('DELETE FROM peers WHERE name = $1', [peer.name]);
+    await revokePeerAccess(peer, result.user);
     await logAction(userDbId, peer.name, 'delete', {}, req);
 
     res.json({ ok: true });
@@ -679,6 +1077,13 @@ app.post('/api/webapp/config', async (req, res) => {
     }
 
     const userDbId = await ensureUser(result.user);
+    const profile = await enforceActiveAccess(userDbId, result.user, req);
+    if (!isProfileActive(profile)) {
+      return res.status(402).json({
+        error: 'Пробный период или подписка истекли. Выберите тариф.',
+        code: 'SUBSCRIPTION_REQUIRED'
+      });
+    }
     const peer = await getUserPeerByUserId(userDbId);
     if (!peer) {
       return res.status(400).json({ error: 'У вас нет активных VPN-профилей.' });
@@ -705,6 +1110,59 @@ app.post('/api/webapp/config', async (req, res) => {
   }
 });
 
+app.post('/api/webapp/apply-referral', async (req, res) => {
+  try {
+    const { initData, dev, referral_code } = req.body;
+    const result = getWebAppUser({ initData, devRequested: Boolean(dev) });
+    if (!result) {
+      return res.status(401).json({ error: 'Invalid init data' });
+    }
+
+    if (!referral_code || !String(referral_code).trim()) {
+      return res.status(400).json({ error: 'referral_code обязателен' });
+    }
+
+    const userDbId = await ensureUser(result.user);
+    await attachReferral(userDbId, referral_code);
+    const profile = await getUserProfileByTelegramId(result.user.id);
+    const referral = await getReferralSummary(userDbId, profile?.referral_code);
+
+    res.json({ ok: true, referral });
+  } catch (error) {
+    console.error('Ошибка apply-referral:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/webapp/payments/create', async (req, res) => {
+  try {
+    const { initData, dev, tariff_code } = req.body;
+    const result = getWebAppUser({ initData, devRequested: Boolean(dev) });
+    if (!result) {
+      return res.status(401).json({ error: 'Invalid init data' });
+    }
+
+    const subscription = result.dev
+      ? { subscribed: true, status: 'dev' }
+      : await checkTelegramSubscription(result.user.id);
+    if (!subscription.subscribed) {
+      return res.status(403).json({ error: 'Подпишитесь на канал для доступа.' });
+    }
+
+    const userDbId = await ensureUser(result.user);
+    const payment = await createPaymentRequest(userDbId, tariff_code);
+
+    res.json({
+      ok: true,
+      payment,
+      instructions: `Заявка #${payment.id} создана. Сейчас оплата подтверждается вручную через поддержку: @${SUPPORT_USERNAME}.`
+    });
+  } catch (error) {
+    console.error('Ошибка payments create:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.post('/api/webapp/admin/users', async (req, res) => {
   try {
     const auth = await requireAdmin(req, res);
@@ -720,8 +1178,9 @@ app.post('/api/webapp/admin/users', async (req, res) => {
     }
 
     const users = await pool.query(
-      `SELECT u.id, u.telegram_id, u.username, u.vpn_status, u.created_at, u.tariff_expiry
+      `SELECT u.id, u.telegram_id, u.username, u.vpn_status, u.created_at, u.tariff_expiry, t.name AS tariff_name
        FROM users u
+       LEFT JOIN tariffs t ON t.id = u.tariff_id
        ${where}
        ORDER BY u.created_at DESC
        LIMIT 200`,
@@ -731,6 +1190,76 @@ app.post('/api/webapp/admin/users', async (req, res) => {
     res.json({ ok: true, users: users.rows });
   } catch (error) {
     console.error('Ошибка admin users:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/webapp/admin/payments', async (req, res) => {
+  try {
+    const auth = await requireAdmin(req, res);
+    if (!auth) return;
+
+    const payments = await pool.query(
+      `SELECT p.id, p.amount, p.currency, p.status, p.created_at, p.paid_at, p.rejected_at,
+              t.name AS tariff_name, t.code AS tariff_code,
+              u.telegram_id, u.username
+       FROM payments p
+       JOIN tariffs t ON t.id = p.tariff_id
+       JOIN users u ON u.id = p.user_id
+       ORDER BY
+         CASE p.status
+           WHEN 'pending' THEN 0
+           WHEN 'paid' THEN 1
+           ELSE 2
+         END,
+         p.created_at DESC
+       LIMIT 100`
+    );
+
+    res.json({ ok: true, payments: payments.rows });
+  } catch (error) {
+    console.error('Ошибка admin payments:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/webapp/admin/approve-payment', async (req, res) => {
+  try {
+    const auth = await requireAdmin(req, res);
+    if (!auth) return;
+
+    const { payment_id } = req.body;
+    if (!payment_id) {
+      return res.status(400).json({ error: 'payment_id обязателен' });
+    }
+
+    await approvePayment(Number(payment_id));
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('Ошибка approve-payment:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/webapp/admin/reject-payment', async (req, res) => {
+  try {
+    const auth = await requireAdmin(req, res);
+    if (!auth) return;
+
+    const { payment_id } = req.body;
+    if (!payment_id) {
+      return res.status(400).json({ error: 'payment_id обязателен' });
+    }
+
+    await pool.query(
+      `UPDATE payments
+       SET status = 'rejected', rejected_at = NOW()
+       WHERE id = $1 AND status = 'pending'`,
+      [Number(payment_id)]
+    );
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('Ошибка reject-payment:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
