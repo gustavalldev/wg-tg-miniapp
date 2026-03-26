@@ -134,7 +134,6 @@ export default function App() {
   async function runWithBusy(message, action) {
     setError('');
     setBusyMessage(message);
-    setStatusLine(message);
     try {
       return await action();
     } finally {
@@ -507,8 +506,9 @@ export default function App() {
       <header className="app__header">
         <h1>VPN Guard</h1>
         <p className="muted">{statusLine}</p>
-        {isBusy && <div className="loading-indicator">Загрузка…</div>}
       </header>
+
+      {isBusy && <section className="loading-notice">{busyMessage || 'Загрузка…'}</section>}
 
       <nav className="tabs">
         <button className={activeTab === 'home' ? 'tab tab--active' : 'tab'} onClick={() => setActiveTab('home')}>Главная</button>
