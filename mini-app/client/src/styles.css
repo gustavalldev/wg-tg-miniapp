@@ -123,6 +123,13 @@ body {
   margin-top: 16px;
 }
 
+.admin-subtabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
 .admin-controls {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -291,6 +298,26 @@ body {
   word-break: break-word;
 }
 
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.metric-card {
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  border-radius: 14px;
+  background: #f7f9fc;
+  border: 1px solid #e9edf5;
+}
+
+.metric-card strong {
+  font-size: 22px;
+  line-height: 1;
+}
+
 @media (max-width: 640px) {
   .app {
     padding: 16px 12px 28px;
@@ -312,5 +339,9 @@ body {
   .admin-actions .button,
   .actions .button {
     width: 100%;
+  }
+
+  .metrics-grid {
+    grid-template-columns: 1fr;
   }
 }

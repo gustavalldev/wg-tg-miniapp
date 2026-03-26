@@ -647,6 +647,33 @@ async function getPromoCodes() {
   return result.rows;
 }
 
+async function getAdminMetrics() {
+  const result = await pool.query(
+    `SELECT
+        (SELECT COUNT(*)::int FROM users) AS total_users,
+        (SELECT COUNT(*)::int
+         FROM users u
+         LEFT JOIN tariffs t ON t.id = u.tariff_id
+         WHERE u.vpn_status <> 'blocked'
+           AND (
+             t.code = 'tester'
+             OR (u.tariff_expiry IS NOT NULL AND u.tariff_expiry > NOW())
+           )) AS active_access_users,
+        (SELECT COUNT(*)::int
+         FROM users u
+         LEFT JOIN tariffs t ON t.id = u.tariff_id
+         WHERE u.vpn_status <> 'blocked'
+           AND u.tariff_expiry IS NOT NULL
+           AND u.tariff_expiry > NOW()
+           AND t.code NOT IN ('trial-30d', 'promo-access', 'tester')) AS active_paid_subscriptions,
+        (SELECT COUNT(*)::int FROM peers WHERE active = true) AS active_profiles,
+        (SELECT COUNT(*)::int FROM payments WHERE status = 'paid') AS paid_orders_count,
+        (SELECT COALESCE(SUM(amount), 0)::numeric(10,2) FROM payments WHERE status = 'paid') AS paid_revenue_rub,
+        (SELECT COUNT(*)::int FROM promo_codes WHERE active = true) AS active_promo_codes`
+  );
+  return result.rows[0];
+}
+
 async function createPromoCode({ code, description, durationDays, maxRedemptions, expiresAt, createdByUserId }) {
   const normalizedCode = normalizePromoCode(code);
   if (!normalizedCode) {
@@ -1390,6 +1417,19 @@ app.post('/api/webapp/admin/users', async (req, res) => {
     res.json({ ok: true, users: users.rows });
   } catch (error) {
     console.error('Ошибка admin users:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/webapp/admin/metrics', async (req, res) => {
+  try {
+    const auth = await requireAdmin(req, res);
+    if (!auth) return;
+
+    const metrics = await getAdminMetrics();
+    res.json({ ok: true, metrics });
+  } catch (error) {
+    console.error('Ошибка admin metrics:', error.message);
     res.status(500).json({ error: error.message });
   }
 });

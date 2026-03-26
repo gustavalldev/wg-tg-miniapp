@@ -54,6 +54,11 @@ function normalizePromoStatus(promoCode) {
   return { label: 'Активен', tone: 'online' };
 }
 
+function formatMetricValue(value) {
+  if (value === null || value === undefined) return '0';
+  return new Intl.NumberFormat('ru-RU').format(Number(value));
+}
+
 function downloadConfigFile(config, fileName = 'vpn-profile.json', mimeType = 'application/json') {
   const blob = new Blob([config], { type: mimeType });
   const url = URL.createObjectURL(blob);
@@ -129,10 +134,11 @@ export default function App() {
   const [tariffs, setTariffs] = useState([]);
   const [referral, setReferral] = useState(null);
   const [pendingPayment, setPendingPayment] = useState(null);
-  const [payments, setPayments] = useState([]);
   const [referralInput, setReferralInput] = useState('');
   const [promoCodeInput, setPromoCodeInput] = useState('');
   const [promoCodes, setPromoCodes] = useState([]);
+  const [adminMetrics, setAdminMetrics] = useState(null);
+  const [adminTab, setAdminTab] = useState('overview');
   const [promoForm, setPromoForm] = useState({
     code: '',
     description: '',
@@ -238,13 +244,13 @@ export default function App() {
     setPeers(result.peers || []);
   }
 
-  async function loadAdminPayments() {
+  async function loadAdminMetrics() {
     if (!tgContext) return;
-    const result = await postJson('/api/webapp/admin/payments', {
+    const result = await postJson('/api/webapp/admin/metrics', {
       initData: tgContext.webApp.initData || null,
       dev: Boolean(tgContext.isLocalDev)
     });
-    setPayments(result.payments || []);
+    setAdminMetrics(result.metrics || null);
   }
 
   async function loadAdminPromoCodes() {
@@ -272,9 +278,9 @@ export default function App() {
 
   useEffect(() => {
     if (tgContext && isAdmin) {
+      loadAdminMetrics().catch(err => setError(err.message));
       loadAdminUsers().catch(err => setError(err.message));
       loadAdminPeers().catch(err => setError(err.message));
-      loadAdminPayments().catch(err => setError(err.message));
       loadAdminPromoCodes().catch(err => setError(err.message));
     }
   }, [tgContext, isAdmin]);
@@ -507,33 +513,6 @@ export default function App() {
       setBroadcastStatus(`Готово: ${result.success} успешно, ${result.errors} ошибок`);
     } catch (err) {
       setBroadcastStatus('Ошибка отправки');
-      setError(err.message);
-    }
-  }
-
-  async function handleApprovePayment(paymentId) {
-    try {
-      await postJson('/api/webapp/admin/approve-payment', {
-        initData: tgContext.webApp.initData || null,
-        dev: Boolean(tgContext.isLocalDev),
-        payment_id: Number(paymentId)
-      });
-      await loadAdminPayments();
-      await loadAdminUsers();
-    } catch (err) {
-      setError(err.message);
-    }
-  }
-
-  async function handleRejectPayment(paymentId) {
-    try {
-      await postJson('/api/webapp/admin/reject-payment', {
-        initData: tgContext.webApp.initData || null,
-        dev: Boolean(tgContext.isLocalDev),
-        payment_id: Number(paymentId)
-      });
-      await loadAdminPayments();
-    } catch (err) {
       setError(err.message);
     }
   }
@@ -818,183 +797,200 @@ export default function App() {
       {subscribed && activeTab === 'admin' && isAdmin && (
         <section className="card">
           <h2>Админка</h2>
-          <div className="admin-controls">
-            <input
-              className="input"
-              placeholder="Поиск по username или id"
-              value={usersSearch}
-              onChange={(event) => setUsersSearch(event.target.value)}
-              onKeyDown={(event) => event.key === 'Enter' && loadAdminUsers()}
-            />
-            <button className="button button--secondary" onClick={loadAdminUsers}>Обновить пользователей</button>
+          <div className="admin-subtabs">
+            <button className={adminTab === 'overview' ? 'tab tab--active' : 'tab'} onClick={() => setAdminTab('overview')}>Обзор</button>
+            <button className={adminTab === 'users' ? 'tab tab--active' : 'tab'} onClick={() => setAdminTab('users')}>Пользователи</button>
+            <button className={adminTab === 'peers' ? 'tab tab--active' : 'tab'} onClick={() => setAdminTab('peers')}>Профили</button>
+            <button className={adminTab === 'promo' ? 'tab tab--active' : 'tab'} onClick={() => setAdminTab('promo')}>Промокоды</button>
+            <button className={adminTab === 'broadcast' ? 'tab tab--active' : 'tab'} onClick={() => setAdminTab('broadcast')}>Рассылка</button>
           </div>
 
-          <div className="admin-section">
-            <h3>Пользователи</h3>
-            <div className="admin-list">
-              {users.length === 0 && <span className="muted">Нет данных</span>}
-              {users.map(user => (
-                <div key={user.telegram_id} className="admin-item">
-                  <div><strong>@{user.username || '—'}</strong> (id: {user.telegram_id})</div>
-                  <div>Тариф: {user.tariff_name || '—'}</div>
-                  <div>Статус: {user.vpn_status || 'active'}</div>
-                  <div className="admin-actions">
-                    <button className="button button--secondary" onClick={() => handleBan(user.telegram_id)}>Забанить</button>
-                    <button className="button button--secondary" onClick={() => handleUnban(user.telegram_id)}>Разбанить</button>
-                  </div>
+          {adminTab === 'overview' && (
+            <div className="admin-section">
+              <div className="admin-actions">
+                <button className="button button--secondary" onClick={loadAdminMetrics} disabled={isBusy}>Обновить метрики</button>
+              </div>
+              <div className="metrics-grid">
+                <div className="metric-card">
+                  <span className="muted">Пользователей всего</span>
+                  <strong>{formatMetricValue(adminMetrics?.total_users)}</strong>
                 </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="admin-controls">
-            <input
-              className="input"
-              placeholder="Поиск по имени или username"
-              value={peersSearch}
-              onChange={(event) => setPeersSearch(event.target.value)}
-              onKeyDown={(event) => event.key === 'Enter' && loadAdminPeers()}
-            />
-            <button className="button button--secondary" onClick={loadAdminPeers}>Обновить пиры</button>
-          </div>
-
-          <div className="admin-section">
-            <h3>Пиры</h3>
-            <div className="admin-list">
-              {peers.length === 0 && <span className="muted">Нет данных</span>}
-              {peers.map(peerItem => (
-                <div key={peerItem.name} className="admin-item">
-                  <div>
-                    <strong>{peerItem.name}</strong> ({peerItem.protocol || 'VPN'})
-                    <br />
-                    Идентификатор: {peerItem.ip || '—'}
-                  </div>
-                  <div>Пользователь: @{peerItem.username || '—'} ({peerItem.telegram_id || '—'})</div>
-                  <div className="admin-actions">
-                    <button className="button button--secondary" onClick={() => handleDeletePeer(peerItem.name)}>Удалить профиль</button>
-                    <button className="button button--secondary" onClick={() => handleDownloadPeer(peerItem.name)}>Скачать профиль</button>
-                  </div>
+                <div className="metric-card">
+                  <span className="muted">Активный доступ</span>
+                  <strong>{formatMetricValue(adminMetrics?.active_access_users)}</strong>
                 </div>
-              ))}
+                <div className="metric-card">
+                  <span className="muted">Активные платные тарифы</span>
+                  <strong>{formatMetricValue(adminMetrics?.active_paid_subscriptions)}</strong>
+                </div>
+                <div className="metric-card">
+                  <span className="muted">Активные профили</span>
+                  <strong>{formatMetricValue(adminMetrics?.active_profiles)}</strong>
+                </div>
+                <div className="metric-card">
+                  <span className="muted">Оплаченных заказов</span>
+                  <strong>{formatMetricValue(adminMetrics?.paid_orders_count)}</strong>
+                </div>
+                <div className="metric-card">
+                  <span className="muted">Выручка, ₽</span>
+                  <strong>{formatMetricValue(adminMetrics?.paid_revenue_rub)}</strong>
+                </div>
+                <div className="metric-card">
+                  <span className="muted">Активные промокоды</span>
+                  <strong>{formatMetricValue(adminMetrics?.active_promo_codes)}</strong>
+                </div>
+              </div>
             </div>
-          </div>
+          )}
 
-          <div className="admin-section">
-            <h3>Платежи</h3>
-            <div className="admin-actions">
-              <button className="button button--secondary" onClick={loadAdminPayments}>Обновить платежи</button>
-            </div>
-            <div className="admin-list">
-              {payments.length === 0 && <span className="muted">Нет данных</span>}
-              {payments.map(payment => {
-                const status = normalizePaymentStatus(payment.status);
-                return (
-                  <div key={payment.id} className="admin-item">
-                    <div className="server-row">
-                      <strong>Заявка #{payment.id}</strong>
-                      <span className={`status-pill status-pill--${status.tone}`}>{status.label}</span>
+          {adminTab === 'users' && (
+            <div className="admin-section">
+              <div className="admin-controls">
+                <input
+                  className="input"
+                  placeholder="Поиск по username или id"
+                  value={usersSearch}
+                  onChange={(event) => setUsersSearch(event.target.value)}
+                  onKeyDown={(event) => event.key === 'Enter' && loadAdminUsers()}
+                />
+                <button className="button button--secondary" onClick={loadAdminUsers}>Обновить пользователей</button>
+              </div>
+              <div className="admin-list">
+                {users.length === 0 && <span className="muted">Нет данных</span>}
+                {users.map(user => (
+                  <div key={user.telegram_id} className="admin-item">
+                    <div><strong>@{user.username || '—'}</strong> (id: {user.telegram_id})</div>
+                    <div>Тариф: {user.tariff_name || '—'}</div>
+                    <div>Статус: {user.vpn_status || 'active'}</div>
+                    <div className="admin-actions">
+                      <button className="button button--secondary" onClick={() => handleBan(user.telegram_id)}>Забанить</button>
+                      <button className="button button--secondary" onClick={() => handleUnban(user.telegram_id)}>Разбанить</button>
                     </div>
-                    <div>@{payment.username || '—'} ({payment.telegram_id})</div>
-                    <div>Тариф: {payment.tariff_name}</div>
-                    <div>Сумма: {formatPrice(payment.amount)} ₽</div>
-                    <div className="muted">Создано: {formatDate(payment.created_at)}</div>
-                    {payment.status === 'pending' && (
-                      <div className="admin-actions">
-                        <button className="button button--secondary" onClick={() => handleApprovePayment(payment.id)}>Подтвердить</button>
-                        <button className="button button--secondary" onClick={() => handleRejectPayment(payment.id)}>Отклонить</button>
-                      </div>
-                    )}
                   </div>
-                );
-              })}
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
-          <div className="admin-section">
-            <h3>Промокоды</h3>
-            <div className="promo-form">
-              <input
-                className="input"
-                placeholder="Код"
-                value={promoForm.code}
-                onChange={(event) => setPromoForm(prev => ({ ...prev, code: event.target.value.toUpperCase() }))}
-              />
-              <input
-                className="input"
-                placeholder="Описание"
-                value={promoForm.description}
-                onChange={(event) => setPromoForm(prev => ({ ...prev, description: event.target.value }))}
-              />
-              <input
-                className="input"
-                placeholder="Дней доступа"
-                value={promoForm.duration_days}
-                onChange={(event) => setPromoForm(prev => ({ ...prev, duration_days: event.target.value }))}
-              />
-              <input
-                className="input"
-                placeholder="Лимит использований"
-                value={promoForm.max_redemptions}
-                onChange={(event) => setPromoForm(prev => ({ ...prev, max_redemptions: event.target.value }))}
-              />
-              <input
-                className="input"
-                type="datetime-local"
-                value={promoForm.expires_at}
-                onChange={(event) => setPromoForm(prev => ({ ...prev, expires_at: event.target.value }))}
-              />
-              <button className="button button--secondary" onClick={handleCreatePromoCode} disabled={isBusy}>
-                {isBusy ? 'Подождите…' : 'Создать промокод'}
-              </button>
-            </div>
-            <div className="admin-actions">
-              <button className="button button--secondary" onClick={loadAdminPromoCodes} disabled={isBusy}>Обновить промокоды</button>
-            </div>
-            <div className="admin-list">
-              {promoCodes.length === 0 && <span className="muted">Нет данных</span>}
-              {promoCodes.map(promoCode => {
-                const status = normalizePromoStatus(promoCode);
-                return (
-                  <div key={promoCode.id} className="admin-item">
-                    <div className="server-row">
-                      <strong>{promoCode.code}</strong>
-                      <span className={`status-pill status-pill--${status.tone}`}>{status.label}</span>
+          {adminTab === 'peers' && (
+            <div className="admin-section">
+              <div className="admin-controls">
+                <input
+                  className="input"
+                  placeholder="Поиск по имени или username"
+                  value={peersSearch}
+                  onChange={(event) => setPeersSearch(event.target.value)}
+                  onKeyDown={(event) => event.key === 'Enter' && loadAdminPeers()}
+                />
+                <button className="button button--secondary" onClick={loadAdminPeers}>Обновить пиры</button>
+              </div>
+              <div className="admin-list">
+                {peers.length === 0 && <span className="muted">Нет данных</span>}
+                {peers.map(peerItem => (
+                  <div key={peerItem.name} className="admin-item">
+                    <div>
+                      <strong>{peerItem.name}</strong> ({peerItem.protocol || 'VPN'})
+                      <br />
+                      Идентификатор: {peerItem.ip || '—'}
                     </div>
-                    <div>{promoCode.description || 'Без описания'}</div>
-                    <div>Дней доступа: {promoCode.duration_days}</div>
-                    <div>Использований: {promoCode.redemptions_count} / {promoCode.max_redemptions}</div>
-                    <div className="muted">Истекает: {formatDate(promoCode.expires_at)}</div>
-                    {promoCode.active !== false && (
-                      <div className="admin-actions">
-                        <button
-                          className="button button--secondary"
-                          onClick={() => handleDisablePromoCode(promoCode.id)}
-                          disabled={isBusy}
-                        >
-                          {isBusy ? 'Подождите…' : 'Выключить'}
-                        </button>
-                      </div>
-                    )}
+                    <div>Пользователь: @{peerItem.username || '—'} ({peerItem.telegram_id || '—'})</div>
+                    <div className="admin-actions">
+                      <button className="button button--secondary" onClick={() => handleDeletePeer(peerItem.name)}>Удалить профиль</button>
+                      <button className="button button--secondary" onClick={() => handleDownloadPeer(peerItem.name)}>Скачать профиль</button>
+                    </div>
                   </div>
-                );
-              })}
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
-          <div className="admin-section">
-            <h3>Рассылка</h3>
-            <textarea
-              className="textarea"
-              rows={4}
-              placeholder="Текст рассылки (HTML разрешён)"
-              value={broadcastMessage}
-              onChange={(event) => setBroadcastMessage(event.target.value)}
-            />
-            <div className="admin-actions">
-              <button className="button" onClick={handleBroadcast}>Отправить</button>
-              {broadcastStatus && <span className="muted">{broadcastStatus}</span>}
+          {adminTab === 'promo' && (
+            <div className="admin-section">
+              <div className="promo-form">
+                <input
+                  className="input"
+                  placeholder="Код"
+                  value={promoForm.code}
+                  onChange={(event) => setPromoForm(prev => ({ ...prev, code: event.target.value.toUpperCase() }))}
+                />
+                <input
+                  className="input"
+                  placeholder="Описание"
+                  value={promoForm.description}
+                  onChange={(event) => setPromoForm(prev => ({ ...prev, description: event.target.value }))}
+                />
+                <input
+                  className="input"
+                  placeholder="Дней доступа"
+                  value={promoForm.duration_days}
+                  onChange={(event) => setPromoForm(prev => ({ ...prev, duration_days: event.target.value }))}
+                />
+                <input
+                  className="input"
+                  placeholder="Лимит использований"
+                  value={promoForm.max_redemptions}
+                  onChange={(event) => setPromoForm(prev => ({ ...prev, max_redemptions: event.target.value }))}
+                />
+                <input
+                  className="input"
+                  type="datetime-local"
+                  value={promoForm.expires_at}
+                  onChange={(event) => setPromoForm(prev => ({ ...prev, expires_at: event.target.value }))}
+                />
+                <button className="button button--secondary" onClick={handleCreatePromoCode} disabled={isBusy}>
+                  {isBusy ? 'Подождите…' : 'Создать промокод'}
+                </button>
+              </div>
+              <div className="admin-actions">
+                <button className="button button--secondary" onClick={loadAdminPromoCodes} disabled={isBusy}>Обновить промокоды</button>
+              </div>
+              <div className="admin-list">
+                {promoCodes.length === 0 && <span className="muted">Нет данных</span>}
+                {promoCodes.map(promoCode => {
+                  const status = normalizePromoStatus(promoCode);
+                  return (
+                    <div key={promoCode.id} className="admin-item">
+                      <div className="server-row">
+                        <strong>{promoCode.code}</strong>
+                        <span className={`status-pill status-pill--${status.tone}`}>{status.label}</span>
+                      </div>
+                      <div>{promoCode.description || 'Без описания'}</div>
+                      <div>Дней доступа: {promoCode.duration_days}</div>
+                      <div>Использований: {promoCode.redemptions_count} / {promoCode.max_redemptions}</div>
+                      <div className="muted">Истекает: {formatDate(promoCode.expires_at)}</div>
+                      {promoCode.active !== false && (
+                        <div className="admin-actions">
+                          <button
+                            className="button button--secondary"
+                            onClick={() => handleDisablePromoCode(promoCode.id)}
+                            disabled={isBusy}
+                          >
+                            {isBusy ? 'Подождите…' : 'Выключить'}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-          </div>
+          )}
+
+          {adminTab === 'broadcast' && (
+            <div className="admin-section">
+              <textarea
+                className="textarea"
+                rows={4}
+                placeholder="Текст рассылки (HTML разрешён)"
+                value={broadcastMessage}
+                onChange={(event) => setBroadcastMessage(event.target.value)}
+              />
+              <div className="admin-actions">
+                <button className="button" onClick={handleBroadcast}>Отправить</button>
+                {broadcastStatus && <span className="muted">{broadcastStatus}</span>}
+              </div>
+            </div>
+          )}
         </section>
       )}
 
