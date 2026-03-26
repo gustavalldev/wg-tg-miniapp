@@ -1010,6 +1010,10 @@ export default function App() {
               <a className="link" href="https://play.google.com/store/apps/details?id=com.v2raytun.android&hl=ru" target="_blank" rel="noreferrer">Android</a>
               <a className="link" href="https://v2raytun.com/" target="_blank" rel="noreferrer">Windows / macOS</a>
             </div>
+            <div className="admin-item">
+              <div><strong>Telegram-канал</strong></div>
+              <a className="link" href="https://t.me/+0Dpn_XGJPJcwOTJi" target="_blank" rel="noreferrer">Перейти в канал</a>
+            </div>
             <p className="muted">После добавления профиля включите подключение внутри v2RayTun.</p>
           </section>
         </>
