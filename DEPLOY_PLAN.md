@@ -63,3 +63,4 @@
 - добавить мониторинг и alerting для `Xray` и `provisioner`
 - сделать backup / restore для PostgreSQL
 - привести runtime schema migration к явным миграциям, а не только runtime `ensureSchema()`
+- для регистрации новой ноды использовать `ops/register_direct_vless_node.sql.example`
