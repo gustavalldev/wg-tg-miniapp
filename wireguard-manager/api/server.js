@@ -12,6 +12,7 @@ const PORT = process.env.PORT || 3000;
 const SERVER_IP = process.env.SERVER_IP || '127.0.0.1';
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const CHANNEL_USERNAME = process.env.CHANNEL_USERNAME || '@kirillprodev';
+const TELEGRAM_BOT_USERNAME = (process.env.TELEGRAM_BOT_USERNAME || '@vpn_appguard_bot').replace(/^@/, '');
 const ALLOW_LOCAL_WEBAPP = process.env.ALLOW_LOCAL_WEBAPP === 'true';
 const DEV_TELEGRAM_ID = parseInt(process.env.DEV_TELEGRAM_ID || '999000', 10);
 const DEV_TELEGRAM_USERNAME = process.env.DEV_TELEGRAM_USERNAME || 'localdev';
@@ -594,7 +595,7 @@ async function getReferralSummary(userId, referralCode) {
 
   return {
     code: referralCode,
-    invite_link: referralCode ? `https://t.me/VPN_GuardBot?start=ref_${referralCode}` : null,
+    invite_link: referralCode ? `https://t.me/${TELEGRAM_BOT_USERNAME}?start=ref_${referralCode}` : null,
     invited_total: linked.rows[0]?.total || 0,
     rewarded_total: rewarded.rows[0]?.total || 0,
     reward_days: REFERRAL_REWARD_DAYS
