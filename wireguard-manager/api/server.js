@@ -1459,6 +1459,30 @@ app.post('/api/webapp/admin/create-promo-code', async (req, res) => {
   }
 });
 
+app.post('/api/webapp/admin/disable-promo-code', async (req, res) => {
+  try {
+    const auth = await requireAdmin(req, res);
+    if (!auth) return;
+
+    const { promo_code_id } = req.body;
+    if (!promo_code_id) {
+      return res.status(400).json({ error: 'promo_code_id обязателен' });
+    }
+
+    await pool.query(
+      `UPDATE promo_codes
+       SET active = false
+       WHERE id = $1`,
+      [Number(promo_code_id)]
+    );
+
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('Ошибка disable-promo-code:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.post('/api/webapp/admin/approve-payment', async (req, res) => {
   try {
     const auth = await requireAdmin(req, res);

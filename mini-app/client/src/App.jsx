@@ -569,6 +569,21 @@ export default function App() {
     }
   }
 
+  async function handleDisablePromoCode(promoCodeId) {
+    try {
+      await runWithBusy('Выключаем промокод…', async () => {
+        await postJson('/api/webapp/admin/disable-promo-code', {
+          initData: tgContext.webApp.initData || null,
+          dev: Boolean(tgContext.isLocalDev),
+          promo_code_id: Number(promoCodeId)
+        });
+        await loadAdminPromoCodes();
+      });
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
   if (!tgContext) {
     return (
       <div className="app">
@@ -949,6 +964,17 @@ export default function App() {
                     <div>Дней доступа: {promoCode.duration_days}</div>
                     <div>Использований: {promoCode.redemptions_count} / {promoCode.max_redemptions}</div>
                     <div className="muted">Истекает: {formatDate(promoCode.expires_at)}</div>
+                    {promoCode.active !== false && (
+                      <div className="admin-actions">
+                        <button
+                          className="button button--secondary"
+                          onClick={() => handleDisablePromoCode(promoCode.id)}
+                          disabled={isBusy}
+                        >
+                          {isBusy ? 'Подождите…' : 'Выключить'}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 );
               })}
