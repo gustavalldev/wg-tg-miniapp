@@ -606,7 +606,7 @@ export default function App() {
           <section className="card">
             <h2>Поддержка</h2>
             <p>Если есть вопросы по доступу или оплате, пишите в поддержку.</p>
-            <a className="link" href="https://t.me/kkasyanov" target="_blank" rel="noreferrer">@kkasyanov</a>
+            <a className="link" href="https://t.me/vpnguardsupport" target="_blank" rel="noreferrer">@vpnguardsupport</a>
           </section>
         </>
       )}

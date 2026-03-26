@@ -34,7 +34,7 @@ const TRIAL_TARIFF_CODE = process.env.TRIAL_TARIFF_CODE || 'trial-30d';
 const TRIAL_DAYS = parseInt(process.env.TRIAL_DAYS || '30', 10);
 const REFERRAL_REWARD_DAYS = parseInt(process.env.REFERRAL_REWARD_DAYS || '7', 10);
 const PAYMENT_PROVIDER = process.env.PAYMENT_PROVIDER || 'manual';
-const SUPPORT_USERNAME = process.env.SUPPORT_USERNAME || 'kkasyanov';
+const SUPPORT_USERNAME = process.env.SUPPORT_USERNAME || 'vpnguardsupport';
 
 const pool = new Pool({
   host: process.env.PG_HOST,

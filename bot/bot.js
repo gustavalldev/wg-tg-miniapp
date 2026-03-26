@@ -271,7 +271,7 @@ bot.action('check_subscription', async (ctx) => {
 
 bot.action('help', async (ctx) => {
     await ctx.answerCbQuery();
-    await ctx.reply('Связаться с поддержкой: @kkasyanov', mainMenuMarkup);
+    await ctx.reply('Связаться с поддержкой: @vpnguardsupport', mainMenuMarkup);
 });
 
 function handleTelegramError(err, ctx) {
