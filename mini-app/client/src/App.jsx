@@ -1004,6 +1004,12 @@ export default function App() {
               <li>Нажмите «Скопировать ссылку».</li>
               <li>Откройте v2RayTun, добавьте новый профиль и вставьте туда URL подключения.</li>
             </ol>
+            <div className="admin-item">
+              <div><strong>Скачать v2RayTun</strong></div>
+              <a className="link" href="https://apps.apple.com/ru/app/v2raytun/id6476628951" target="_blank" rel="noreferrer">iPhone / iPad</a>
+              <a className="link" href="https://play.google.com/store/apps/details?id=com.v2raytun.android&hl=ru" target="_blank" rel="noreferrer">Android</a>
+              <a className="link" href="https://v2raytun.com/" target="_blank" rel="noreferrer">Windows / macOS</a>
+            </div>
             <p className="muted">После добавления профиля включите подключение внутри v2RayTun.</p>
           </section>
         </>
