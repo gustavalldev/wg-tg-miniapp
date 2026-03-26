@@ -17,6 +17,23 @@ function formatDate(value) {
   return date.toLocaleDateString('ru-RU');
 }
 
+function formatServerTitle(index) {
+  return `Сервер ${index + 1}`;
+}
+
+function formatServerLocation(location) {
+  if (!location) return 'Локация неизвестна';
+  return location;
+}
+
+function normalizeServerStatus(status) {
+  const normalized = String(status || '').toLowerCase();
+  if (['online', 'active', 'running', 'healthy', 'up'].includes(normalized)) {
+    return { label: 'Активен', tone: 'online' };
+  }
+  return { label: 'Недоступен', tone: 'offline' };
+}
+
 function downloadConfigFile(config, fileName = 'vpn-profile.json', mimeType = 'application/json') {
   const blob = new Blob([config], { type: mimeType });
   const url = URL.createObjectURL(blob);
@@ -406,9 +423,9 @@ export default function App() {
                 value={selectedServerId}
                 onChange={(event) => setSelectedServerId(event.target.value)}
               >
-                {servers.map(server => (
+                {servers.map((server, index) => (
                   <option key={server.id} value={server.id}>
-                    {server.name}{server.is_default ? ' • основной' : ''} ({server.status})
+                    {formatServerTitle(index)} • {formatServerLocation(server.location)}
                   </option>
                 ))}
               </select>
@@ -459,18 +476,21 @@ export default function App() {
           <h2>VPN серверы</h2>
           <div className="admin-list">
             {servers.length === 0 && <span className="muted">Нет данных</span>}
-            {servers.map(server => (
+            {servers.map((server, index) => {
+              const status = normalizeServerStatus(server.status);
+              return (
               <div key={server.id} className="admin-item">
                 <div className="server-row">
-                  <strong>{server.name}</strong>
+                  <strong>{formatServerTitle(index)}</strong>
                   {server.is_default && <span className="badge">Основной</span>}
-                  <span className="muted">({server.ip})</span>
+                  <span className={`status-pill status-pill--${status.tone}`}>{status.label}</span>
                 </div>
-                {server.location && <div>Регион: {server.location}</div>}
+                <div>Локация: {formatServerLocation(server.location)}</div>
                 <div>Протокол: {server.protocol || 'VPN'}</div>
-                <div>Статус: {server.status}</div>
+                <div className="muted">IP: {server.ip || '—'}</div>
               </div>
-            ))}
+              );
+            })}
           </div>
         </section>
       )}
