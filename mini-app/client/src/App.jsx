@@ -29,6 +29,23 @@ function downloadConfigFile(config, fileName = 'vpn-profile.json', mimeType = 'a
   URL.revokeObjectURL(url);
 }
 
+async function copyToClipboard(value) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+
+  const textarea = document.createElement('textarea');
+  textarea.value = value;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'absolute';
+  textarea.style.left = '-9999px';
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand('copy');
+  textarea.remove();
+}
+
 async function postJson(path, body) {
   const response = await fetch(`${API_BASE}${path}`, {
     method: 'POST',
@@ -182,8 +199,8 @@ export default function App() {
         dev: Boolean(tgContext.isLocalDev),
         server_id: selectedServerId || null
       });
-      if (result?.config) {
-        downloadConfigFile(result.config, result.download_name, result.mime_type);
+      if (result?.peer) {
+        setPeer(result.peer);
       }
       await loadProfile();
     } catch (err) {
@@ -213,14 +230,38 @@ export default function App() {
         initData: tgContext.webApp.initData || null,
         dev: Boolean(tgContext.isLocalDev)
       });
-      if (result?.config) {
-        downloadConfigFile(result.config, result.download_name, result.mime_type);
+      if (result?.peer) {
+        setPeer(result.peer);
       }
       await loadProfile();
     } catch (err) {
       setError(err.message);
       setStatusLine('Ошибка');
     }
+  }
+
+  async function handleCopyAccessUri() {
+    if (!peer?.access_uri) {
+      setError('Ссылка подключения недоступна.');
+      return;
+    }
+
+    try {
+      await copyToClipboard(peer.access_uri);
+      setError('');
+      setStatusLine('Ссылка скопирована');
+    } catch (err) {
+      setError('Не удалось скопировать ссылку.');
+    }
+  }
+
+  function handleOpenInClient() {
+    if (!peer?.access_uri) {
+      setError('Ссылка подключения недоступна.');
+      return;
+    }
+
+    window.location.href = peer.access_uri;
   }
 
   async function handleBan(telegramId) {
@@ -392,9 +433,13 @@ export default function App() {
                   <strong>{peer.name}</strong> ({peer.protocol || 'VPN'})
                   <br />
                   Идентификатор: {peer.ip || '—'}
+                  <br />
+                  <span className="muted">{peer.access_uri || 'Ссылка подключения недоступна'}</span>
                 </div>
                 <div className="admin-actions">
-                  <button className="button button--secondary" onClick={handleDownload}>Скачать профиль</button>
+                  <button className="button button--secondary" onClick={handleCopyAccessUri}>Скопировать ссылку</button>
+                  <button className="button button--secondary" onClick={handleOpenInClient}>Открыть в клиенте</button>
+                  <button className="button button--secondary" onClick={handleDownload}>Обновить ссылку</button>
                   <button className="button button--secondary" onClick={handleRemove}>Удалить профиль</button>
                 </div>
               </div>
