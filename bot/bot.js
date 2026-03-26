@@ -102,8 +102,28 @@ async function ensureBotSchema() {
             paid_at timestamp without time zone,
             rejected_at timestamp without time zone
         )`,
+        `CREATE TABLE IF NOT EXISTS public.promo_codes (
+            id serial PRIMARY KEY,
+            code text NOT NULL,
+            description text,
+            duration_days integer NOT NULL DEFAULT 30,
+            max_redemptions integer NOT NULL DEFAULT 1,
+            active boolean DEFAULT true,
+            created_by_user_id integer REFERENCES public.users(id),
+            created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+            expires_at timestamp without time zone
+        )`,
+        `CREATE TABLE IF NOT EXISTS public.promo_code_redemptions (
+            id serial PRIMARY KEY,
+            promo_code_id integer NOT NULL REFERENCES public.promo_codes(id),
+            user_id integer NOT NULL REFERENCES public.users(id),
+            granted_days integer NOT NULL DEFAULT 0,
+            redeemed_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+        )`,
         'CREATE UNIQUE INDEX IF NOT EXISTS users_referral_code_uq ON public.users (referral_code)',
-        'CREATE UNIQUE INDEX IF NOT EXISTS tariffs_code_uq ON public.tariffs (code)'
+        'CREATE UNIQUE INDEX IF NOT EXISTS tariffs_code_uq ON public.tariffs (code)',
+        'CREATE UNIQUE INDEX IF NOT EXISTS promo_codes_code_uq ON public.promo_codes (code)',
+        'CREATE UNIQUE INDEX IF NOT EXISTS promo_code_redemptions_promo_user_uq ON public.promo_code_redemptions (promo_code_id, user_id)'
     ];
 
     for (const statement of statements) {
@@ -119,6 +139,7 @@ async function ensureBotSchema() {
            ('plan-6m', '6 месяцев', 6, 990.00, 'Подписка на 6 месяцев', 180, true, 30),
            ('plan-lifetime', 'Навсегда', 1200, 9000.00, 'Пожизненный доступ без продления', 36500, true, 40),
            ('service-personal-vpn', 'Личный VPN сервер', 0, 15000.00, 'Разработка и настройка отдельного личного VPN сервера', 0, true, 50),
+           ('promo-access', 'Промокод', 0, 0.00, 'Доступ, активированный через промокод', 0, true, 90),
            ('tester', 'tester', 0, 0.00, 'Тестовый тариф', 0, true, 100)
          ON CONFLICT (code) DO NOTHING`
     );

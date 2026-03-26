@@ -46,6 +46,14 @@ function normalizePaymentStatus(status) {
   return { label: 'Ожидает', tone: 'pending' };
 }
 
+function normalizePromoStatus(promoCode) {
+  if (promoCode.active === false) return { label: 'Выключен', tone: 'offline' };
+  if ((promoCode.redemptions_count ?? 0) >= (promoCode.max_redemptions ?? 0)) {
+    return { label: 'Лимит исчерпан', tone: 'pending' };
+  }
+  return { label: 'Активен', tone: 'online' };
+}
+
 function downloadConfigFile(config, fileName = 'vpn-profile.json', mimeType = 'application/json') {
   const blob = new Blob([config], { type: mimeType });
   const url = URL.createObjectURL(blob);
@@ -123,6 +131,15 @@ export default function App() {
   const [pendingPayment, setPendingPayment] = useState(null);
   const [payments, setPayments] = useState([]);
   const [referralInput, setReferralInput] = useState('');
+  const [promoCodeInput, setPromoCodeInput] = useState('');
+  const [promoCodes, setPromoCodes] = useState([]);
+  const [promoForm, setPromoForm] = useState({
+    code: '',
+    description: '',
+    duration_days: '30',
+    max_redemptions: '1',
+    expires_at: ''
+  });
   const [selectedServerId, setSelectedServerId] = useState('');
   const [activeTab, setActiveTab] = useState('home');
   const [tgContext, setTgContext] = useState(null);
@@ -230,6 +247,15 @@ export default function App() {
     setPayments(result.payments || []);
   }
 
+  async function loadAdminPromoCodes() {
+    if (!tgContext) return;
+    const result = await postJson('/api/webapp/admin/promo-codes', {
+      initData: tgContext.webApp.initData || null,
+      dev: Boolean(tgContext.isLocalDev)
+    });
+    setPromoCodes(result.promo_codes || []);
+  }
+
   useEffect(() => {
     if (!tgContext) return;
     loadProfile().catch(err => setError(err.message));
@@ -249,6 +275,7 @@ export default function App() {
       loadAdminUsers().catch(err => setError(err.message));
       loadAdminPeers().catch(err => setError(err.message));
       loadAdminPayments().catch(err => setError(err.message));
+      loadAdminPromoCodes().catch(err => setError(err.message));
     }
   }, [tgContext, isAdmin]);
 
@@ -361,6 +388,28 @@ export default function App() {
         setReferral(result.referral || null);
         setReferralInput('');
         setStatusLine('Бонусный код применён');
+      });
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function handleApplyPromoCode() {
+    if (!promoCodeInput.trim()) {
+      setError('Введите промокод.');
+      return;
+    }
+
+    try {
+      await runWithBusy('Активируем промокод…', async () => {
+        const result = await postJson('/api/webapp/apply-promo', {
+          initData: tgContext.webApp.initData || null,
+          dev: Boolean(tgContext.isLocalDev),
+          promo_code: promoCodeInput.trim()
+        });
+        setPromoCodeInput('');
+        setProfile(result.profile || defaultProfile);
+        setStatusLine(`Промокод активирован: +${result.promo?.duration_days || 0} дн.`);
       });
     } catch (err) {
       setError(err.message);
@@ -484,6 +533,37 @@ export default function App() {
         payment_id: Number(paymentId)
       });
       await loadAdminPayments();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function handleCreatePromoCode() {
+    if (!promoForm.code.trim()) {
+      setError('Введите код промокода.');
+      return;
+    }
+
+    try {
+      await runWithBusy('Создаём промокод…', async () => {
+        await postJson('/api/webapp/admin/create-promo-code', {
+          initData: tgContext.webApp.initData || null,
+          dev: Boolean(tgContext.isLocalDev),
+          code: promoForm.code.trim(),
+          description: promoForm.description.trim(),
+          duration_days: Number(promoForm.duration_days || 30),
+          max_redemptions: Number(promoForm.max_redemptions || 1),
+          expires_at: promoForm.expires_at || null
+        });
+        setPromoForm({
+          code: '',
+          description: '',
+          duration_days: '30',
+          max_redemptions: '1',
+          expires_at: ''
+        });
+        await loadAdminPromoCodes();
+      });
     } catch (err) {
       setError(err.message);
     }
@@ -677,6 +757,22 @@ export default function App() {
               {isBusy ? 'Подождите…' : 'Применить'}
             </button>
           </div>
+
+          <div className="promo-block">
+            <h3>Промокод</h3>
+            <p className="muted">Если у вас есть промокод от администратора, активируйте его здесь.</p>
+            <div className="admin-controls">
+              <input
+                className="input"
+                placeholder="Ввести промокод"
+                value={promoCodeInput}
+                onChange={(event) => setPromoCodeInput(event.target.value)}
+              />
+              <button className="button button--secondary" onClick={handleApplyPromoCode} disabled={isBusy}>
+                {isBusy ? 'Подождите…' : 'Активировать'}
+              </button>
+            </div>
+          </div>
         </section>
       )}
 
@@ -793,6 +889,66 @@ export default function App() {
                         <button className="button button--secondary" onClick={() => handleRejectPayment(payment.id)}>Отклонить</button>
                       </div>
                     )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="admin-section">
+            <h3>Промокоды</h3>
+            <div className="promo-form">
+              <input
+                className="input"
+                placeholder="Код"
+                value={promoForm.code}
+                onChange={(event) => setPromoForm(prev => ({ ...prev, code: event.target.value.toUpperCase() }))}
+              />
+              <input
+                className="input"
+                placeholder="Описание"
+                value={promoForm.description}
+                onChange={(event) => setPromoForm(prev => ({ ...prev, description: event.target.value }))}
+              />
+              <input
+                className="input"
+                placeholder="Дней доступа"
+                value={promoForm.duration_days}
+                onChange={(event) => setPromoForm(prev => ({ ...prev, duration_days: event.target.value }))}
+              />
+              <input
+                className="input"
+                placeholder="Лимит использований"
+                value={promoForm.max_redemptions}
+                onChange={(event) => setPromoForm(prev => ({ ...prev, max_redemptions: event.target.value }))}
+              />
+              <input
+                className="input"
+                type="datetime-local"
+                value={promoForm.expires_at}
+                onChange={(event) => setPromoForm(prev => ({ ...prev, expires_at: event.target.value }))}
+              />
+              <button className="button button--secondary" onClick={handleCreatePromoCode} disabled={isBusy}>
+                {isBusy ? 'Подождите…' : 'Создать промокод'}
+              </button>
+            </div>
+            <div className="admin-actions">
+              <button className="button button--secondary" onClick={loadAdminPromoCodes} disabled={isBusy}>Обновить промокоды</button>
+            </div>
+            <div className="admin-list">
+              {promoCodes.length === 0 && <span className="muted">Нет данных</span>}
+              {promoCodes.map(promoCode => {
+                const status = normalizePromoStatus(promoCode);
+                return (
+                  <div key={promoCode.id} className="admin-item">
+                    <div className="server-row">
+                      <strong>{promoCode.code}</strong>
+                      <span className={`status-pill status-pill--${status.tone}`}>{status.label}</span>
+                    </div>
+                    <div>{promoCode.description || 'Без описания'}</div>
+                    <div>Дней доступа: {promoCode.duration_days}</div>
+                    <div>Использований: {promoCode.redemptions_count} / {promoCode.max_redemptions}</div>
+                    <div className="muted">Истекает: {formatDate(promoCode.expires_at)}</div>
                   </div>
                 );
               })}

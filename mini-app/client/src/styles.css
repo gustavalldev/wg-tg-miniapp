@@ -245,6 +245,18 @@ body {
   background: #fbfcff;
 }
 
+.promo-block {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #eef0f4;
+}
+
+.promo-form {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
 .plan-card__footer {
   display: flex;
   align-items: center;

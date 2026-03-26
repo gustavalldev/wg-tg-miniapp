@@ -35,6 +35,7 @@ const TRIAL_DAYS = parseInt(process.env.TRIAL_DAYS || '30', 10);
 const REFERRAL_REWARD_DAYS = parseInt(process.env.REFERRAL_REWARD_DAYS || '7', 10);
 const PAYMENT_PROVIDER = process.env.PAYMENT_PROVIDER || 'manual';
 const SUPPORT_USERNAME = process.env.SUPPORT_USERNAME || 'vpnguardsupport';
+const PROMO_TARIFF_CODE = process.env.PROMO_TARIFF_CODE || 'promo-access';
 
 const pool = new Pool({
   host: process.env.PG_HOST,
@@ -242,6 +243,24 @@ async function ensureSchema() {
       paid_at timestamp without time zone,
       rejected_at timestamp without time zone
     )`,
+    `CREATE TABLE IF NOT EXISTS public.promo_codes (
+      id serial PRIMARY KEY,
+      code text NOT NULL,
+      description text,
+      duration_days integer NOT NULL DEFAULT 30,
+      max_redemptions integer NOT NULL DEFAULT 1,
+      active boolean DEFAULT true,
+      created_by_user_id integer REFERENCES public.users(id),
+      created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+      expires_at timestamp without time zone
+    )`,
+    `CREATE TABLE IF NOT EXISTS public.promo_code_redemptions (
+      id serial PRIMARY KEY,
+      promo_code_id integer NOT NULL REFERENCES public.promo_codes(id),
+      user_id integer NOT NULL REFERENCES public.users(id),
+      granted_days integer NOT NULL DEFAULT 0,
+      redeemed_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+    )`,
     'CREATE UNIQUE INDEX IF NOT EXISTS access_profiles_profile_name_uq ON public.access_profiles (profile_name)',
     'CREATE INDEX IF NOT EXISTS access_profiles_user_id_idx ON public.access_profiles (user_id)',
     'CREATE INDEX IF NOT EXISTS access_profiles_route_id_idx ON public.access_profiles (route_id)',
@@ -250,7 +269,10 @@ async function ensureSchema() {
     'CREATE UNIQUE INDEX IF NOT EXISTS tariffs_code_uq ON public.tariffs (code)',
     'CREATE INDEX IF NOT EXISTS users_referred_by_user_id_idx ON public.users (referred_by_user_id)',
     'CREATE INDEX IF NOT EXISTS payments_user_id_idx ON public.payments (user_id)',
-    'CREATE INDEX IF NOT EXISTS payments_status_idx ON public.payments (status)'
+    'CREATE INDEX IF NOT EXISTS payments_status_idx ON public.payments (status)',
+    'CREATE UNIQUE INDEX IF NOT EXISTS promo_codes_code_uq ON public.promo_codes (code)',
+    'CREATE UNIQUE INDEX IF NOT EXISTS promo_code_redemptions_promo_user_uq ON public.promo_code_redemptions (promo_code_id, user_id)',
+    'CREATE INDEX IF NOT EXISTS promo_code_redemptions_promo_code_id_idx ON public.promo_code_redemptions (promo_code_id)'
   ];
 
   for (const statement of statements) {
@@ -319,6 +341,15 @@ async function seedTariffs() {
       price: 15000,
       description: 'Разработка и настройка отдельного личного VPN сервера',
       sort_order: 50
+    },
+    {
+      code: 'promo-access',
+      name: 'Промокод',
+      duration_months: 0,
+      duration_days: 0,
+      price: 0,
+      description: 'Доступ, активированный через промокод',
+      sort_order: 90
     },
     {
       code: 'tester',
@@ -589,14 +620,59 @@ async function attachReferral(userId, referralCode) {
   );
 }
 
+function normalizePromoCode(value) {
+  return String(value || '').trim().toUpperCase();
+}
+
 async function getTariffs() {
   const result = await pool.query(
     `SELECT id, code, name, duration_months, duration_days, price, description, sort_order
      FROM tariffs
-     WHERE is_active = true AND code <> 'tester'
+     WHERE is_active = true AND code NOT IN ('tester', 'promo-access')
      ORDER BY sort_order, duration_days, price`
   );
   return result.rows;
+}
+
+async function getPromoCodes() {
+  const result = await pool.query(
+    `SELECT p.id, p.code, p.description, p.duration_days, p.max_redemptions, p.active, p.created_at, p.expires_at,
+            COALESCE(COUNT(r.id), 0)::int AS redemptions_count
+     FROM promo_codes p
+     LEFT JOIN promo_code_redemptions r ON r.promo_code_id = p.id
+     GROUP BY p.id
+     ORDER BY p.created_at DESC
+     LIMIT 200`
+  );
+  return result.rows;
+}
+
+async function createPromoCode({ code, description, durationDays, maxRedemptions, expiresAt, createdByUserId }) {
+  const normalizedCode = normalizePromoCode(code);
+  if (!normalizedCode) {
+    throw new Error('code обязателен');
+  }
+  if (!Number.isFinite(durationDays) || durationDays <= 0) {
+    throw new Error('duration_days должен быть больше 0');
+  }
+  if (!Number.isFinite(maxRedemptions) || maxRedemptions <= 0) {
+    throw new Error('max_redemptions должен быть больше 0');
+  }
+
+  const result = await pool.query(
+    `INSERT INTO promo_codes (code, description, duration_days, max_redemptions, active, created_by_user_id, expires_at)
+     VALUES ($1, $2, $3, $4, true, $5, $6)
+     RETURNING id, code, description, duration_days, max_redemptions, active, created_at, expires_at`,
+    [
+      normalizedCode,
+      description || null,
+      durationDays,
+      maxRedemptions,
+      createdByUserId || null,
+      expiresAt || null
+    ]
+  );
+  return result.rows[0];
 }
 
 async function getReferralSummary(userId, referralCode) {
@@ -694,6 +770,70 @@ async function applyReferralRewardIfEligible(userId) {
       [rewardExpiryForReferrer, referrer.id]
     );
   }
+}
+
+async function applyPromoCode(userDbId, code) {
+  const normalizedCode = normalizePromoCode(code);
+  if (!normalizedCode) {
+    throw new Error('Промокод обязателен.');
+  }
+
+  const promoRes = await pool.query(
+    `SELECT p.id, p.code, p.description, p.duration_days, p.max_redemptions, p.active, p.expires_at,
+            COALESCE(COUNT(r.id), 0)::int AS redemptions_count
+     FROM promo_codes p
+     LEFT JOIN promo_code_redemptions r ON r.promo_code_id = p.id
+     WHERE p.code = $1
+     GROUP BY p.id
+     LIMIT 1`,
+    [normalizedCode]
+  );
+  const promo = promoRes.rows[0];
+  if (!promo || !promo.active) {
+    throw new Error('Промокод не найден или выключен.');
+  }
+  if (promo.expires_at && new Date(promo.expires_at) < new Date()) {
+    throw new Error('Срок действия промокода истёк.');
+  }
+  if ((promo.redemptions_count || 0) >= promo.max_redemptions) {
+    throw new Error('Лимит использований промокода исчерпан.');
+  }
+
+  const existingRedemption = await pool.query(
+    'SELECT 1 FROM promo_code_redemptions WHERE promo_code_id = $1 AND user_id = $2 LIMIT 1',
+    [promo.id, userDbId]
+  );
+  if (existingRedemption.rows.length > 0) {
+    throw new Error('Вы уже использовали этот промокод.');
+  }
+
+  const [userRes, promoTariff] = await Promise.all([
+    pool.query('SELECT tariff_expiry FROM users WHERE id = $1 LIMIT 1', [userDbId]),
+    getTariffByCode(PROMO_TARIFF_CODE)
+  ]);
+  const user = userRes.rows[0];
+  const nextExpiry = computeExpiryFromDays(user?.tariff_expiry || null, promo.duration_days || 0);
+
+  await pool.query(
+    `INSERT INTO promo_code_redemptions (promo_code_id, user_id, granted_days)
+     VALUES ($1, $2, $3)`,
+    [promo.id, userDbId, promo.duration_days]
+  );
+
+  await pool.query(
+    `UPDATE users
+     SET tariff_id = $1,
+         tariff_expiry = $2,
+         vpn_status = 'active'
+     WHERE id = $3`,
+    [promoTariff?.id || null, nextExpiry, userDbId]
+  );
+
+  return {
+    code: promo.code,
+    duration_days: promo.duration_days,
+    expires_at: nextExpiry
+  };
 }
 
 async function approvePayment(paymentId) {
@@ -1164,6 +1304,36 @@ app.post('/api/webapp/apply-referral', async (req, res) => {
   }
 });
 
+app.post('/api/webapp/apply-promo', async (req, res) => {
+  try {
+    const { initData, dev, promo_code } = req.body;
+    const result = getWebAppUser({ initData, devRequested: Boolean(dev) });
+    if (!result) {
+      return res.status(401).json({ error: 'Invalid init data' });
+    }
+
+    const subscription = result.dev
+      ? { subscribed: true, status: 'dev' }
+      : await checkTelegramSubscription(result.user.id);
+    if (!subscription.subscribed) {
+      return res.status(403).json({ error: 'Подпишитесь на канал для доступа.' });
+    }
+
+    const userDbId = await ensureUser(result.user);
+    const appliedPromo = await applyPromoCode(userDbId, promo_code);
+    const profile = await getUserProfileByTelegramId(result.user.id);
+
+    res.json({
+      ok: true,
+      promo: appliedPromo,
+      profile
+    });
+  } catch (error) {
+    console.error('Ошибка apply-promo:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.post('/api/webapp/payments/create', async (req, res) => {
   try {
     const { initData, dev, tariff_code } = req.body;
@@ -1249,6 +1419,42 @@ app.post('/api/webapp/admin/payments', async (req, res) => {
     res.json({ ok: true, payments: payments.rows });
   } catch (error) {
     console.error('Ошибка admin payments:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/webapp/admin/promo-codes', async (req, res) => {
+  try {
+    const auth = await requireAdmin(req, res);
+    if (!auth) return;
+
+    const promoCodes = await getPromoCodes();
+    res.json({ ok: true, promo_codes: promoCodes });
+  } catch (error) {
+    console.error('Ошибка admin promo-codes:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/webapp/admin/create-promo-code', async (req, res) => {
+  try {
+    const auth = await requireAdmin(req, res);
+    if (!auth) return;
+
+    const { code, description, duration_days, max_redemptions, expires_at } = req.body;
+    const createdByUserId = await ensureUser(auth.user);
+    const promoCode = await createPromoCode({
+      code,
+      description,
+      durationDays: Number(duration_days || 30),
+      maxRedemptions: Number(max_redemptions || 1),
+      expiresAt: expires_at || null,
+      createdByUserId
+    });
+
+    res.json({ ok: true, promo_code: promoCode });
+  } catch (error) {
+    console.error('Ошибка create-promo-code:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
