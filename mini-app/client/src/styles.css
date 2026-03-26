@@ -26,6 +26,18 @@ body {
   margin-bottom: 16px;
 }
 
+.loading-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #eef3ff;
+  color: #2f5cff;
+  font-size: 13px;
+  font-weight: 600;
+}
+
 .tabs {
   display: flex;
   gap: 8px;
@@ -85,6 +97,11 @@ body {
   cursor: pointer;
   text-decoration: none;
   text-align: center;
+}
+
+.button:disabled {
+  opacity: 0.6;
+  cursor: wait;
 }
 
 .button--secondary {
@@ -212,6 +229,13 @@ body {
 .plan-list {
   display: grid;
   gap: 12px;
+}
+
+.plan-current {
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: #f4f7ff;
 }
 
 .plan-card {

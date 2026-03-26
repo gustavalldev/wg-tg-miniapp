@@ -126,8 +126,21 @@ export default function App() {
   const [selectedServerId, setSelectedServerId] = useState('');
   const [activeTab, setActiveTab] = useState('home');
   const [tgContext, setTgContext] = useState(null);
+  const [busyMessage, setBusyMessage] = useState('');
 
   const channelLink = useMemo(() => `https://t.me/${CHANNEL_USERNAME.replace('@', '')}`, []);
+  const isBusy = Boolean(busyMessage);
+
+  async function runWithBusy(message, action) {
+    setError('');
+    setBusyMessage(message);
+    setStatusLine(message);
+    try {
+      return await action();
+    } finally {
+      setBusyMessage('');
+    }
+  }
 
   useEffect(() => {
     const context = resolveTelegramContext();
@@ -146,10 +159,12 @@ export default function App() {
     context.webApp.expand();
   }, []);
 
-  async function loadProfile() {
+  async function loadProfile(options = {}) {
     if (!tgContext) return;
-    setError('');
-    setStatusLine('Проверяем доступ…');
+    if (!options.silent) {
+      setError('');
+      setStatusLine('Проверяем доступ…');
+    }
 
     const data = await postJson('/api/webapp/auth', {
       initData: tgContext.webApp.initData || null,
@@ -240,16 +255,17 @@ export default function App() {
 
   async function handleConnect() {
     try {
-      setStatusLine('Создаём VPN…');
-      const result = await postJson('/api/webapp/connect', {
-        initData: tgContext.webApp.initData || null,
-        dev: Boolean(tgContext.isLocalDev),
-        server_id: selectedServerId || null
+      await runWithBusy('Создаём профиль…', async () => {
+        const result = await postJson('/api/webapp/connect', {
+          initData: tgContext.webApp.initData || null,
+          dev: Boolean(tgContext.isLocalDev),
+          server_id: selectedServerId || null
+        });
+        if (result?.peer) {
+          setPeer(result.peer);
+        }
+        await loadProfile({ silent: true });
       });
-      if (result?.peer) {
-        setPeer(result.peer);
-      }
-      await loadProfile();
     } catch (err) {
       setError(err.message);
       setStatusLine('Ошибка');
@@ -258,12 +274,13 @@ export default function App() {
 
   async function handleRemove() {
     try {
-      setStatusLine('Удаляем VPN…');
-      await postJson('/api/webapp/remove', {
-        initData: tgContext.webApp.initData || null,
-        dev: Boolean(tgContext.isLocalDev)
+      await runWithBusy('Удаляем профиль…', async () => {
+        await postJson('/api/webapp/remove', {
+          initData: tgContext.webApp.initData || null,
+          dev: Boolean(tgContext.isLocalDev)
+        });
+        await loadProfile({ silent: true });
       });
-      await loadProfile();
     } catch (err) {
       setError(err.message);
       setStatusLine('Ошибка');
@@ -272,15 +289,16 @@ export default function App() {
 
   async function handleDownload() {
     try {
-      setStatusLine('Готовим конфиг…');
-      const result = await postJson('/api/webapp/config', {
-        initData: tgContext.webApp.initData || null,
-        dev: Boolean(tgContext.isLocalDev)
+      await runWithBusy('Обновляем ссылку…', async () => {
+        const result = await postJson('/api/webapp/config', {
+          initData: tgContext.webApp.initData || null,
+          dev: Boolean(tgContext.isLocalDev)
+        });
+        if (result?.peer) {
+          setPeer(result.peer);
+        }
+        await loadProfile({ silent: true });
       });
-      if (result?.peer) {
-        setPeer(result.peer);
-      }
-      await loadProfile();
     } catch (err) {
       setError(err.message);
       setStatusLine('Ошибка');
@@ -313,14 +331,16 @@ export default function App() {
 
   async function handleCreatePayment(tariffCode) {
     try {
-      const result = await postJson('/api/webapp/payments/create', {
-        initData: tgContext.webApp.initData || null,
-        dev: Boolean(tgContext.isLocalDev),
-        tariff_code: tariffCode
+      await runWithBusy('Создаём заявку на оплату…', async () => {
+        const result = await postJson('/api/webapp/payments/create', {
+          initData: tgContext.webApp.initData || null,
+          dev: Boolean(tgContext.isLocalDev),
+          tariff_code: tariffCode
+        });
+        setPendingPayment(result.payment || null);
+        setStatusLine(result.instructions || 'Заявка на оплату создана.');
+        await loadProfile({ silent: true });
       });
-      setPendingPayment(result.payment || null);
-      setStatusLine(result.instructions || 'Заявка на оплату создана.');
-      await loadProfile();
     } catch (err) {
       setError(err.message);
     }
@@ -333,14 +353,16 @@ export default function App() {
     }
 
     try {
-      const result = await postJson('/api/webapp/apply-referral', {
-        initData: tgContext.webApp.initData || null,
-        dev: Boolean(tgContext.isLocalDev),
-        referral_code: referralInput.trim()
+      await runWithBusy('Применяем код…', async () => {
+        const result = await postJson('/api/webapp/apply-referral', {
+          initData: tgContext.webApp.initData || null,
+          dev: Boolean(tgContext.isLocalDev),
+          referral_code: referralInput.trim()
+        });
+        setReferral(result.referral || null);
+        setReferralInput('');
+        setStatusLine('Бонусный код применён');
       });
-      setReferral(result.referral || null);
-      setReferralInput('');
-      setStatusLine('Реферальный код применён');
     } catch (err) {
       setError(err.message);
     }
@@ -354,9 +376,9 @@ export default function App() {
 
     try {
       await copyToClipboard(referral.invite_link);
-      setStatusLine('Реферальная ссылка скопирована');
+      setStatusLine('Ссылка приглашения скопирована');
     } catch (_err) {
-      setError('Не удалось скопировать реферальную ссылку.');
+      setError('Не удалось скопировать ссылку приглашения.');
     }
   }
 
@@ -485,12 +507,13 @@ export default function App() {
       <header className="app__header">
         <h1>VPN Guard</h1>
         <p className="muted">{statusLine}</p>
+        {isBusy && <div className="loading-indicator">Загрузка…</div>}
       </header>
 
       <nav className="tabs">
         <button className={activeTab === 'home' ? 'tab tab--active' : 'tab'} onClick={() => setActiveTab('home')}>Главная</button>
         <button className={activeTab === 'billing' ? 'tab tab--active' : 'tab'} onClick={() => setActiveTab('billing')}>Тарифы</button>
-        <button className={activeTab === 'referral' ? 'tab tab--active' : 'tab'} onClick={() => setActiveTab('referral')}>Рефералы</button>
+        <button className={activeTab === 'referral' ? 'tab tab--active' : 'tab'} onClick={() => setActiveTab('referral')}>Бонусы</button>
         <button className={activeTab === 'servers' ? 'tab tab--active' : 'tab'} onClick={() => setActiveTab('servers')}>Серверы</button>
         <button className={activeTab === 'support' ? 'tab tab--active' : 'tab'} onClick={() => setActiveTab('support')}>Инструкция</button>
         {isAdmin && (
@@ -504,7 +527,7 @@ export default function App() {
           <p>Для доступа к VPN и приложению подпишитесь на канал.</p>
           <div className="actions">
             <a className="button" href={channelLink} target="_blank" rel="noreferrer">Перейти в канал</a>
-            <button className="button button--secondary" onClick={loadProfile}>Проверить подписку</button>
+            <button className="button button--secondary" onClick={loadProfile} disabled={isBusy}>Проверить подписку</button>
           </div>
         </section>
       )}
@@ -552,9 +575,9 @@ export default function App() {
               <button
                 className="button"
                 onClick={handleConnect}
-                disabled={Boolean(peer) || !selectedServerId || !profile.has_active_access}
+                disabled={isBusy || Boolean(peer) || !selectedServerId || !profile.has_active_access}
               >
-                Создать профиль
+                {isBusy ? 'Подождите…' : 'Создать профиль'}
               </button>
             </div>
           </section>
@@ -571,10 +594,10 @@ export default function App() {
                   <span className="muted">{peer.access_uri || 'Ссылка подключения недоступна'}</span>
                 </div>
                 <div className="admin-actions">
-                  <button className="button button--secondary" onClick={handleCopyAccessUri}>Скопировать ссылку</button>
-                  <button className="button button--secondary" onClick={handleOpenInClient}>Открыть в клиенте</button>
-                  <button className="button button--secondary" onClick={handleDownload}>Обновить ссылку</button>
-                  <button className="button button--secondary" onClick={handleRemove}>Удалить профиль</button>
+                  <button className="button button--secondary" onClick={handleCopyAccessUri} disabled={isBusy}>Скопировать ссылку</button>
+                  <button className="button button--secondary" onClick={handleOpenInClient} disabled={isBusy}>Открыть в клиенте</button>
+                  <button className="button button--secondary" onClick={handleDownload} disabled={isBusy}>{isBusy ? 'Подождите…' : 'Обновить ссылку'}</button>
+                  <button className="button button--secondary" onClick={handleRemove} disabled={isBusy}>{isBusy ? 'Подождите…' : 'Удалить профиль'}</button>
                 </div>
               </div>
             )}
@@ -592,6 +615,11 @@ export default function App() {
         <section className="card">
           <h2>Тарифы</h2>
           <p className="muted">Выберите подходящий тариф. Первый месяц для новых пользователей бесплатный.</p>
+          <div className="plan-current">
+            <strong>Текущий тариф:</strong> {profile.tariff_name || 'Без тарифа'}
+            <br />
+            <span className="muted">Действует до: {formatDate(profile.tariff_expiry)}</span>
+          </div>
           <div className="plan-list">
             {tariffs.filter(tariff => tariff.code !== 'trial-30d').map(tariff => (
               <div key={tariff.code} className="plan-card">
@@ -604,8 +632,9 @@ export default function App() {
                   <button
                     className="button button--secondary"
                     onClick={() => handleCreatePayment(tariff.code)}
+                    disabled={isBusy}
                   >
-                    Выбрать
+                    {isBusy ? 'Подождите…' : 'Выбрать'}
                   </button>
                 </div>
               </div>
@@ -621,13 +650,13 @@ export default function App() {
 
       {subscribed && activeTab === 'referral' && (
         <section className="card">
-          <h2>Реферальная программа</h2>
+          <h2>Бонусы за приглашения</h2>
           <p className="muted">
             За первую оплаченную подписку приглашённого пользователя вы оба получите по {referral?.reward_days || 7} дней доступа.
           </p>
           {referral?.invite_link && (
             <div className="admin-actions">
-              <button className="button button--secondary" onClick={handleCopyReferralLink}>Скопировать referral link</button>
+              <button className="button button--secondary" onClick={handleCopyReferralLink} disabled={isBusy}>Скопировать ссылку</button>
             </div>
           )}
           {referral && (
@@ -640,11 +669,13 @@ export default function App() {
           <div className="admin-controls">
             <input
               className="input"
-              placeholder="Ввести referral code"
+              placeholder="Ввести бонусный код"
               value={referralInput}
               onChange={(event) => setReferralInput(event.target.value)}
             />
-            <button className="button button--secondary" onClick={handleApplyReferral}>Применить</button>
+            <button className="button button--secondary" onClick={handleApplyReferral} disabled={isBusy}>
+              {isBusy ? 'Подождите…' : 'Применить'}
+            </button>
           </div>
         </section>
       )}
