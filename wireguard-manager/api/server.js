@@ -11,7 +11,6 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const SERVER_IP = process.env.SERVER_IP || '127.0.0.1';
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
-const CHANNEL_USERNAME = process.env.CHANNEL_USERNAME || '@kirillprodev';
 const TELEGRAM_BOT_USERNAME = (process.env.TELEGRAM_BOT_USERNAME || '@vpn_appguard_bot').replace(/^@/, '');
 const ALLOW_LOCAL_WEBAPP = process.env.ALLOW_LOCAL_WEBAPP === 'true';
 const DEV_TELEGRAM_ID = parseInt(process.env.DEV_TELEGRAM_ID || '999000', 10);
@@ -142,31 +141,6 @@ function getWebAppUser({ initData, devRequested }) {
 function isAdminUsername(username) {
   if (!username) return false;
   return ADMIN_USERNAMES.includes(username.replace(/^@/, ''));
-}
-
-async function checkTelegramSubscription(userId) {
-  if (!TELEGRAM_TOKEN || !CHANNEL_USERNAME) {
-    return { subscribed: false, status: 'unknown' };
-  }
-
-  try {
-    const response = await axios.get(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/getChatMember`, {
-      params: {
-        chat_id: CHANNEL_USERNAME,
-        user_id: userId
-      }
-    });
-    const status = response.data?.result?.status;
-    return {
-      subscribed: ['creator', 'administrator', 'member'].includes(status),
-      status: status || 'unknown'
-    };
-  } catch (error) {
-    console.error('Ошибка проверки подписки:', error.message);
-    // Telegram can be intermittently unreachable from the control server.
-    // Fail open here to avoid blocking WebApp auth and profile issuance.
-    return { subscribed: true, status: 'error-open' };
-  }
 }
 
 async function sendTelegramMessage(chatId, text) {
@@ -1113,14 +1087,6 @@ async function requireAdmin(req, res) {
     return null;
   }
 
-  if (!result.dev) {
-    const subscription = await checkTelegramSubscription(result.user.id);
-    if (!subscription.subscribed) {
-      res.status(403).json({ error: 'Подпишитесь на канал для доступа.' });
-      return null;
-    }
-  }
-
   return result;
 }
 
@@ -1132,9 +1098,6 @@ app.post('/api/webapp/auth', async (req, res) => {
       return res.status(401).json({ error: 'Invalid init data' });
     }
 
-    const subscription = result.dev
-      ? { subscribed: true, status: 'dev' }
-      : await checkTelegramSubscription(result.user.id);
     const userDbId = await ensureUser(result.user);
     const profile = await enforceActiveAccess(userDbId, result.user);
     const peer = await getUserPeerByUserId(userDbId);
@@ -1147,8 +1110,8 @@ app.post('/api/webapp/auth', async (req, res) => {
     res.json({
       ok: true,
       user: result.user,
-      subscribed: subscription.subscribed,
-      subscription_status: subscription.status,
+      subscribed: true,
+      subscription_status: result.dev ? 'dev' : 'disabled',
       profile,
       peer: peer ? {
         name: peer.name,
@@ -1173,13 +1136,6 @@ app.post('/api/webapp/connect', async (req, res) => {
     const result = getWebAppUser({ initData, devRequested: Boolean(dev) });
     if (!result) {
       return res.status(401).json({ error: 'Invalid init data' });
-    }
-
-    const subscription = result.dev
-      ? { subscribed: true, status: 'dev' }
-      : await checkTelegramSubscription(result.user.id);
-    if (!subscription.subscribed) {
-      return res.status(403).json({ error: 'Подпишитесь на канал для доступа.' });
     }
 
     const servers = await getServersFromDb();
@@ -1234,13 +1190,6 @@ app.post('/api/webapp/remove', async (req, res) => {
       return res.status(401).json({ error: 'Invalid init data' });
     }
 
-    const subscription = result.dev
-      ? { subscribed: true, status: 'dev' }
-      : await checkTelegramSubscription(result.user.id);
-    if (!subscription.subscribed) {
-      return res.status(403).json({ error: 'Подпишитесь на канал для доступа.' });
-    }
-
     const userDbId = await ensureUser(result.user);
     await enforceActiveAccess(userDbId, result.user, req);
     const peer = await getUserPeerByUserId(userDbId);
@@ -1264,13 +1213,6 @@ app.post('/api/webapp/config', async (req, res) => {
     const result = getWebAppUser({ initData, devRequested: Boolean(dev) });
     if (!result) {
       return res.status(401).json({ error: 'Invalid init data' });
-    }
-
-    const subscription = result.dev
-      ? { subscribed: true, status: 'dev' }
-      : await checkTelegramSubscription(result.user.id);
-    if (!subscription.subscribed) {
-      return res.status(403).json({ error: 'Подпишитесь на канал для доступа.' });
     }
 
     const userDbId = await ensureUser(result.user);
@@ -1339,13 +1281,6 @@ app.post('/api/webapp/apply-promo', async (req, res) => {
       return res.status(401).json({ error: 'Invalid init data' });
     }
 
-    const subscription = result.dev
-      ? { subscribed: true, status: 'dev' }
-      : await checkTelegramSubscription(result.user.id);
-    if (!subscription.subscribed) {
-      return res.status(403).json({ error: 'Подпишитесь на канал для доступа.' });
-    }
-
     const userDbId = await ensureUser(result.user);
     const appliedPromo = await applyPromoCode(userDbId, promo_code);
     const profile = await getUserProfileByTelegramId(result.user.id);
@@ -1367,13 +1302,6 @@ app.post('/api/webapp/payments/create', async (req, res) => {
     const result = getWebAppUser({ initData, devRequested: Boolean(dev) });
     if (!result) {
       return res.status(401).json({ error: 'Invalid init data' });
-    }
-
-    const subscription = result.dev
-      ? { subscribed: true, status: 'dev' }
-      : await checkTelegramSubscription(result.user.id);
-    if (!subscription.subscribed) {
-      return res.status(403).json({ error: 'Подпишитесь на канал для доступа.' });
     }
 
     const userDbId = await ensureUser(result.user);

@@ -4,7 +4,6 @@ const axios = require('axios');
 const { Pool } = require('pg');
 const bot = new Telegraf(process.env.TELEGRAM_TOKEN);
 const WEBAPP_URL = process.env.WEBAPP_URL || 'http://localhost:3002';
-const CHANNEL_USERNAME = process.env.CHANNEL_USERNAME || '@kirillprodev';
 const TRIAL_DAYS = parseInt(process.env.TRIAL_DAYS || '30', 10);
 const TRIAL_TARIFF_CODE = process.env.TRIAL_TARIFF_CODE || 'trial-30d';
 
@@ -54,18 +53,6 @@ const mainMenuMarkup = {
         ]
     }
 };
-
-function getSubscribeMarkup() {
-    const channelLink = `https://t.me/${CHANNEL_USERNAME.replace('@', '')}`;
-    return {
-        reply_markup: {
-            inline_keyboard: [
-                [{ text: 'Подписаться на канал', url: channelLink }],
-                [{ text: 'Проверить подписку', callback_data: 'check_subscription' }]
-            ]
-        }
-    };
-}
 
 function makeReferralCode() {
     return require('crypto').randomBytes(5).toString('hex');
@@ -235,34 +222,11 @@ async function ensureUser(ctx, options = {}) {
     return userId;
 }
 
-async function isUserSubscribed(telegramId) {
-    try {
-        const chatMember = await bot.telegram.getChatMember(CHANNEL_USERNAME, telegramId);
-        const status = chatMember?.status;
-        return ['creator', 'administrator', 'member'].includes(status);
-    } catch (err) {
-        console.error('Ошибка проверки подписки:', err.message);
-        return true;
-    }
-}
-
-async function sendSubscribeMessage(ctx) {
-    await ctx.reply(
-        'Чтобы пользоваться VPN и мини‑аппом, подпишитесь на канал и нажмите «Проверить подписку».',
-        getSubscribeMarkup()
-    );
-}
-
 // /start
 bot.start(async (ctx) => {
     try {
         const referralCode = ctx.startPayload || ctx.message?.text?.split(' ').slice(1).join(' ') || null;
         await ensureUser(ctx, { referralCode });
-        const subscribed = await isUserSubscribed(ctx.from.id);
-        if (!subscribed) {
-            await sendSubscribeMessage(ctx);
-            return;
-        }
 
         await ctx.replyWithPhoto(
             { source: 'media/logo_bot.png' },
@@ -283,13 +247,7 @@ bot.start(async (ctx) => {
 
 bot.action('check_subscription', async (ctx) => {
     await ctx.answerCbQuery();
-    const subscribed = await isUserSubscribed(ctx.from.id);
-    if (!subscribed) {
-        await sendSubscribeMessage(ctx);
-        return;
-    }
-
-    await ctx.reply('Подписка подтверждена. Теперь можно открыть приложение.', mainMenuMarkup);
+    await ctx.reply('Приложение уже доступно. Откройте мини-апп.', mainMenuMarkup);
 });
 
 bot.action('help', async (ctx) => {
