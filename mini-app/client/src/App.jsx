@@ -489,6 +489,8 @@ export default function App() {
 
       <nav className="tabs">
         <button className={activeTab === 'home' ? 'tab tab--active' : 'tab'} onClick={() => setActiveTab('home')}>Главная</button>
+        <button className={activeTab === 'billing' ? 'tab tab--active' : 'tab'} onClick={() => setActiveTab('billing')}>Тарифы</button>
+        <button className={activeTab === 'referral' ? 'tab tab--active' : 'tab'} onClick={() => setActiveTab('referral')}>Рефералы</button>
         <button className={activeTab === 'servers' ? 'tab tab--active' : 'tab'} onClick={() => setActiveTab('servers')}>Серверы</button>
         <button className={activeTab === 'support' ? 'tab tab--active' : 'tab'} onClick={() => setActiveTab('support')}>Инструкция</button>
         {isAdmin && (
@@ -556,63 +558,6 @@ export default function App() {
               </button>
             </div>
           </section>
-
-          <section className="card">
-            <h2>Тарифы</h2>
-            <div className="plan-list">
-              {tariffs.filter(tariff => tariff.code !== 'trial-30d').map(tariff => (
-                <div key={tariff.code} className="plan-card">
-                  <div>
-                    <strong>{tariff.name}</strong>
-                    <div className="muted">{tariff.description}</div>
-                  </div>
-                  <div className="plan-card__footer">
-                    <span className="plan-price">{formatPrice(tariff.price)} ₽</span>
-                    <button
-                      className="button button--secondary"
-                      onClick={() => handleCreatePayment(tariff.code)}
-                    >
-                      Выбрать
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-            {pendingPayment && (
-              <p className="billing-note">
-                Заявка #{pendingPayment.id} на тариф {pendingPayment.tariff_name} уже создана. Для подтверждения оплаты напишите в поддержку.
-              </p>
-            )}
-          </section>
-
-          <section className="card">
-            <h2>Реферальная программа</h2>
-            <p className="muted">
-              За первую оплаченную подписку приглашённого пользователя вы оба получите по {referral?.reward_days || 7} дней доступа.
-            </p>
-            {referral?.invite_link && (
-              <div className="admin-actions">
-                <button className="button button--secondary" onClick={handleCopyReferralLink}>Скопировать referral link</button>
-              </div>
-            )}
-            {referral && (
-              <div className="info">
-                {'Код: ' + (referral.code || '—')}
-                {'\nПриглашено: ' + (referral.invited_total ?? 0)}
-                {'\nНаград начислено: ' + (referral.rewarded_total ?? 0)}
-              </div>
-            )}
-            <div className="admin-controls">
-              <input
-                className="input"
-                placeholder="Ввести referral code"
-                value={referralInput}
-                onChange={(event) => setReferralInput(event.target.value)}
-              />
-              <button className="button button--secondary" onClick={handleApplyReferral}>Применить</button>
-            </div>
-          </section>
-
           <section className="card">
             <h2>Мои подключения</h2>
             {!peer && <p className="muted">У вас пока нет активных подключений.</p>}
@@ -641,6 +586,67 @@ export default function App() {
             <a className="link" href="https://t.me/kkasyanov" target="_blank" rel="noreferrer">@kkasyanov</a>
           </section>
         </>
+      )}
+
+      {subscribed && activeTab === 'billing' && (
+        <section className="card">
+          <h2>Тарифы</h2>
+          <p className="muted">Выберите подходящий тариф. Первый месяц для новых пользователей бесплатный.</p>
+          <div className="plan-list">
+            {tariffs.filter(tariff => tariff.code !== 'trial-30d').map(tariff => (
+              <div key={tariff.code} className="plan-card">
+                <div>
+                  <strong>{tariff.name}</strong>
+                  <div className="muted">{tariff.description}</div>
+                </div>
+                <div className="plan-card__footer">
+                  <span className="plan-price">{formatPrice(tariff.price)} ₽</span>
+                  <button
+                    className="button button--secondary"
+                    onClick={() => handleCreatePayment(tariff.code)}
+                  >
+                    Выбрать
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+          {pendingPayment && (
+            <p className="billing-note">
+              Заявка #{pendingPayment.id} на тариф {pendingPayment.tariff_name} уже создана. Для подтверждения оплаты напишите в поддержку.
+            </p>
+          )}
+        </section>
+      )}
+
+      {subscribed && activeTab === 'referral' && (
+        <section className="card">
+          <h2>Реферальная программа</h2>
+          <p className="muted">
+            За первую оплаченную подписку приглашённого пользователя вы оба получите по {referral?.reward_days || 7} дней доступа.
+          </p>
+          {referral?.invite_link && (
+            <div className="admin-actions">
+              <button className="button button--secondary" onClick={handleCopyReferralLink}>Скопировать referral link</button>
+            </div>
+          )}
+          {referral && (
+            <div className="info">
+              {'Код: ' + (referral.code || '—')}
+              {'\nПриглашено: ' + (referral.invited_total ?? 0)}
+              {'\nНаград начислено: ' + (referral.rewarded_total ?? 0)}
+            </div>
+          )}
+          <div className="admin-controls">
+            <input
+              className="input"
+              placeholder="Ввести referral code"
+              value={referralInput}
+              onChange={(event) => setReferralInput(event.target.value)}
+            />
+            <button className="button button--secondary" onClick={handleApplyReferral}>Применить</button>
+          </div>
+        </section>
       )}
 
       {subscribed && activeTab === 'servers' && (
