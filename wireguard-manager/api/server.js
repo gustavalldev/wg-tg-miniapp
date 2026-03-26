@@ -303,6 +303,24 @@ async function seedTariffs() {
       sort_order: 30
     },
     {
+      code: 'plan-lifetime',
+      name: 'Навсегда',
+      duration_months: 1200,
+      duration_days: 36500,
+      price: 9000,
+      description: 'Пожизненный доступ без продления',
+      sort_order: 40
+    },
+    {
+      code: 'service-personal-vpn',
+      name: 'Личный VPN сервер',
+      duration_months: 0,
+      duration_days: 0,
+      price: 15000,
+      description: 'Разработка и настройка отдельного личного VPN сервера',
+      sort_order: 50
+    },
+    {
       code: 'tester',
       name: 'tester',
       duration_months: 0,
@@ -702,21 +720,32 @@ async function approvePayment(paymentId) {
   const user = userRes.rows[0];
   const nextExpiry = computeExpiryFromDays(user?.tariff_expiry || null, payment.duration_days || 0);
 
-  await pool.query(
-    `UPDATE users
-     SET tariff_id = $1,
-         tariff_expiry = $2,
-         vpn_status = 'active'
-     WHERE id = $3`,
-    [payment.tariff_id, nextExpiry, payment.user_id]
-  );
+  if ((payment.duration_days || 0) > 0) {
+    await pool.query(
+      `UPDATE users
+       SET tariff_id = $1,
+           tariff_expiry = $2,
+           vpn_status = 'active'
+       WHERE id = $3`,
+      [payment.tariff_id, nextExpiry, payment.user_id]
+    );
+
+    await pool.query(
+      `UPDATE payments
+       SET status = 'paid', paid_at = NOW()
+       WHERE id = $1`,
+      [payment.id]
+    );
+    await applyReferralRewardIfEligible(payment.user_id);
+    return;
+  }
+
   await pool.query(
     `UPDATE payments
      SET status = 'paid', paid_at = NOW()
      WHERE id = $1`,
     [payment.id]
   );
-  await applyReferralRewardIfEligible(payment.user_id);
 }
 
 async function revokePeerAccess(peer, user) {
