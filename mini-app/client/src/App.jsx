@@ -639,7 +639,7 @@ export default function App() {
             </div>
             {!profile.has_active_access && (
               <p className="billing-alert">
-                Доступ истёк. Выберите тариф ниже, чтобы снова включить VPN.
+                Для продолжения работы выберите подходящий тариф.
               </p>
             )}
             {profile.tariff_code === 'trial-30d' && profile.has_active_access && (
