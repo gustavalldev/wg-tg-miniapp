@@ -5,6 +5,12 @@
   color: #1c1c1e;
 }
 
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
 body {
   margin: 0;
   padding: 0;
@@ -127,6 +133,7 @@ body {
   gap: 6px;
   padding: 10px 0;
   border-bottom: 1px solid #eef0f4;
+  min-width: 0;
 }
 
 .admin-item:last-child {
@@ -137,6 +144,7 @@ body {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+  min-width: 0;
 }
 
 .server-select {
@@ -154,6 +162,7 @@ body {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  min-width: 0;
 }
 
 .badge {
@@ -178,4 +187,34 @@ body {
 .error {
   background: #ffe8e8;
   color: #8a1f1f;
+}
+
+.admin-item .muted {
+  display: block;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+@media (max-width: 640px) {
+  .app {
+    padding: 16px 12px 28px;
+  }
+
+  .card {
+    padding: 14px;
+    border-radius: 14px;
+  }
+
+  .admin-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-actions {
+    flex-direction: column;
+  }
+
+  .admin-actions .button,
+  .actions .button {
+    width: 100%;
+  }
 }
