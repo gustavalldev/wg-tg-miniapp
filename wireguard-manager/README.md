@@ -63,6 +63,9 @@ npm start
 
 - `VPN_PROVIDER_MODE=local-template` - локальная генерация JSON/URI профиля
 - `VPN_PROVIDER_MODE=remote-http` - вызов внешнего backend по `POST /provision` и `POST /revoke`
+- `VPN_BACKEND_URL_MODE=server-ip` - backend выбирается по `server.ip` выбранной ноды
+- `VPN_BACKEND_SCHEME=http` - схема для прямого вызова provisioner
+- `VPN_BACKEND_PORT=3021` - порт provisioner на foreign node
 
 Для `remote-http` ожидается контракт:
 

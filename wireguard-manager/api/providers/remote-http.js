@@ -6,22 +6,61 @@ module.exports = function createRemoteHttpProvider(config) {
     backendToken,
     protocolLabel,
     profileFormat,
-    backendTimeoutMs
+    backendTimeoutMs,
+    backendUrlMode,
+    backendScheme,
+    backendPort
   } = config;
 
-  if (!backendUrl) {
+  const normalizedBackendUrl = String(backendUrl || '').replace(/\/+$/, '');
+  const normalizedUrlMode = backendUrlMode || 'static';
+  const normalizedScheme = backendScheme || 'http';
+  const normalizedPort = Number(backendPort) || 3021;
+
+  if (!normalizedBackendUrl && normalizedUrlMode === 'static') {
     throw new Error('VPN_BACKEND_URL обязателен для remote-http provider');
   }
 
-  const client = axios.create({
-    baseURL: backendUrl.replace(/\/+$/, ''),
-    timeout: backendTimeoutMs,
-    headers: backendToken ? { Authorization: `Bearer ${backendToken}` } : {}
-  });
+  const clients = new Map();
+
+  function buildBackendUrl(server) {
+    const explicitUrl = String(server?.backend_url || server?.provisioner_url || '').trim();
+    if (explicitUrl) {
+      return explicitUrl.replace(/\/+$/, '');
+    }
+
+    if (normalizedUrlMode === 'server-ip') {
+      const host = server?.ip || server?.host || null;
+      if (!host) {
+        throw new Error('Для server-ip режима у сервера должен быть ip или host');
+      }
+      return `${normalizedScheme}://${host}:${normalizedPort}`;
+    }
+
+    return normalizedBackendUrl;
+  }
+
+  function getClient(server) {
+    const resolvedUrl = buildBackendUrl(server);
+    if (!resolvedUrl) {
+      throw new Error('Не удалось определить backend URL');
+    }
+
+    if (!clients.has(resolvedUrl)) {
+      clients.set(resolvedUrl, axios.create({
+        baseURL: resolvedUrl,
+        timeout: backendTimeoutMs,
+        headers: backendToken ? { Authorization: `Bearer ${backendToken}` } : {}
+      }));
+    }
+
+    return clients.get(resolvedUrl);
+  }
 
   return {
     name: 'remote-http',
     async provision({ profile, server, user }) {
+      const client = getClient(server);
       const response = await client.post('/provision', {
         profile,
         server,
@@ -38,7 +77,8 @@ module.exports = function createRemoteHttpProvider(config) {
         providerMeta: data.meta || {}
       };
     },
-    async revoke({ peer }) {
+    async revoke({ peer, server }) {
+      const client = getClient(server);
       await client.post('/revoke', {
         peer: {
           name: peer.name,

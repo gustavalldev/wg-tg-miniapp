@@ -29,6 +29,9 @@ const VPN_PROVIDER_MODE = process.env.VPN_PROVIDER_MODE || 'local-template';
 const VPN_BACKEND_URL = process.env.VPN_BACKEND_URL || '';
 const VPN_BACKEND_TOKEN = process.env.VPN_BACKEND_TOKEN || '';
 const VPN_BACKEND_TIMEOUT_MS = parseInt(process.env.VPN_BACKEND_TIMEOUT_MS || '10000', 10);
+const VPN_BACKEND_URL_MODE = process.env.VPN_BACKEND_URL_MODE || 'static';
+const VPN_BACKEND_SCHEME = process.env.VPN_BACKEND_SCHEME || 'http';
+const VPN_BACKEND_PORT = parseInt(process.env.VPN_BACKEND_PORT || '3021', 10);
 const TRIAL_TARIFF_CODE = process.env.TRIAL_TARIFF_CODE || 'trial-30d';
 const TRIAL_DAYS = parseInt(process.env.TRIAL_DAYS || '30', 10);
 const REFERRAL_REWARD_DAYS = parseInt(process.env.REFERRAL_REWARD_DAYS || '7', 10);
@@ -59,6 +62,9 @@ const vpnProvider = createVpnProvider({
   backendUrl: VPN_BACKEND_URL,
   backendToken: VPN_BACKEND_TOKEN,
   backendTimeoutMs: VPN_BACKEND_TIMEOUT_MS,
+  backendUrlMode: VPN_BACKEND_URL_MODE,
+  backendScheme: VPN_BACKEND_SCHEME,
+  backendPort: VPN_BACKEND_PORT,
   protocolLabel: VPN_PROTOCOL_LABEL,
   profileFormat: VPN_PROFILE_FORMAT,
   accessScheme: VPN_ACCESS_SCHEME,
@@ -890,9 +896,15 @@ async function approvePayment(paymentId) {
 }
 
 async function revokePeerAccess(peer, user) {
+  const servers = await getServersFromDb();
+  const selectedServer = peer?.server_id
+    ? servers.find(server => server.id === peer.server_id || server.route_id === peer.server_id) || null
+    : null;
+
   await vpnProvider.revoke({
     peer,
-    user
+    user,
+    server: selectedServer
   });
   await pool.query('UPDATE access_profiles SET active = false, revoked_at = NOW() WHERE profile_name = $1', [peer.name]);
   await pool.query('DELETE FROM peers WHERE name = $1', [peer.name]);
