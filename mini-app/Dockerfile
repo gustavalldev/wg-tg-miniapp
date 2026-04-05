@@ -14,6 +14,7 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm install --production
 COPY server.js ./
+COPY legal-pages.js ./
 COPY --from=builder /app/client/dist ./client/dist
 EXPOSE 3002
 CMD ["npm", "start"]
