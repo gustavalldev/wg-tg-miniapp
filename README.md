@@ -107,6 +107,28 @@ TELEGRAM_TOKEN=1234567890:ABCdefGHIjklMNOpqrsTUVwxyz
 
 Для разработки локально нужен HTTPS‑туннель (например, `ngrok` или `cloudflared`), чтобы Telegram мог открыть Mini App.
 
+### Юридические страницы и контакты
+
+Mini App server также публикует публичные страницы:
+
+- `/privacy` — политика конфиденциальности
+- `/terms` — пользовательское соглашение
+- `/contact` — контакты владельца/поддержки и форма обращения
+
+Перед продакшен-деплоем заполните в `.env` или `.env.server.example`:
+
+```bash
+LEGAL_SERVICE_NAME=VPN Guard
+LEGAL_OWNER_NAME=Your Legal Name
+LEGAL_CONTACT_EMAIL=support@example.com
+LEGAL_CONTACT_ADDRESS=Your Postal Address
+SUPPORT_EMAIL=support@example.com
+SUPPORT_HOURS=Mon-Fri 10:00-18:00 UTC
+SUPPORT_TICKET_URL=
+```
+
+Если `SUPPORT_TICKET_URL` не задан, обращения из формы `/contact` сохраняются локально в `mini-app/data/support-tickets.jsonl`.
+
 ### VPN API
 
 API автоматически настраивается при запуске контейнеров.

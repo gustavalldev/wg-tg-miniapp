@@ -2,6 +2,34 @@ import React, { useEffect, useMemo, useState } from 'react';
 
 const CHANNEL_USERNAME = import.meta.env.VITE_CHANNEL_USERNAME || '@kirillprodev';
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3000';
+const DEVICE_STORAGE_KEY = 'vpn-guard-device';
+const CLIENT_INSTALLED_STORAGE_KEY = 'vpn-guard-client-installed';
+const CLIENT_OPTIONS = [
+  {
+    id: 'ios',
+    label: 'iPhone / iPad',
+    clientName: 'v2RayTun',
+    downloadUrl: 'https://apps.apple.com/ru/app/v2raytun/id6476628951'
+  },
+  {
+    id: 'android',
+    label: 'Android',
+    clientName: 'v2RayTun',
+    downloadUrl: 'https://play.google.com/store/apps/details?id=com.v2raytun.android&hl=ru'
+  },
+  {
+    id: 'mac',
+    label: 'Mac',
+    clientName: 'v2RayTun',
+    downloadUrl: 'https://v2raytun.com/'
+  },
+  {
+    id: 'windows',
+    label: 'Windows',
+    clientName: 'v2RayTun',
+    downloadUrl: 'https://v2raytun.com/'
+  }
+];
 
 const defaultProfile = {
   tariff_name: null,
@@ -57,6 +85,17 @@ function normalizePromoStatus(promoCode) {
 function formatMetricValue(value) {
   if (value === null || value === undefined) return '0';
   return new Intl.NumberFormat('ru-RU').format(Number(value));
+}
+
+function inferDeviceOptionId() {
+  const userAgent = navigator.userAgent || '';
+
+  if (/iPhone|iPad|iPod/i.test(userAgent)) return 'ios';
+  if (/Android/i.test(userAgent)) return 'android';
+  if (/Macintosh|Mac OS X/i.test(userAgent)) return 'mac';
+  if (/Windows/i.test(userAgent)) return 'windows';
+
+  return '';
 }
 
 function downloadConfigFile(config, fileName = 'vpn-profile.json', mimeType = 'application/json') {
@@ -150,8 +189,28 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('home');
   const [tgContext, setTgContext] = useState(null);
   const [busyMessage, setBusyMessage] = useState('');
+  const [deviceOptionId, setDeviceOptionId] = useState('');
+  const [clientInstalled, setClientInstalled] = useState(false);
 
   const channelLink = useMemo(() => `https://t.me/${CHANNEL_USERNAME.replace('@', '')}`, []);
+  const legalLinks = useMemo(() => {
+    const origin = window.location.origin;
+    return {
+      privacy: `${origin}/privacy`,
+      terms: `${origin}/terms`,
+      contact: `${origin}/contact`
+    };
+  }, []);
+  const selectedDevice = useMemo(
+    () => CLIENT_OPTIONS.find((option) => option.id === deviceOptionId) || null,
+    [deviceOptionId]
+  );
+  const selectedServer = useMemo(
+    () => servers.find((server) => server.id === selectedServerId) || servers[0] || null,
+    [servers, selectedServerId]
+  );
+  const hasMultipleServers = servers.length > 1;
+  const canConnectNow = Boolean(selectedServerId) && profile.has_active_access && clientInstalled && !peer;
   const isBusy = Boolean(busyMessage);
 
   async function runWithBusy(message, action) {
@@ -180,6 +239,34 @@ export default function App() {
     context.webApp.ready();
     context.webApp.expand();
   }, []);
+
+  useEffect(() => {
+    const savedDevice = window.localStorage.getItem(DEVICE_STORAGE_KEY);
+    const inferredDevice = inferDeviceOptionId();
+    const initialDevice = savedDevice || inferredDevice;
+    const savedClientInstalled = window.localStorage.getItem(CLIENT_INSTALLED_STORAGE_KEY) === '1';
+
+    if (initialDevice) {
+      setDeviceOptionId(initialDevice);
+    }
+    setClientInstalled(savedClientInstalled);
+  }, []);
+
+  useEffect(() => {
+    if (deviceOptionId) {
+      window.localStorage.setItem(DEVICE_STORAGE_KEY, deviceOptionId);
+    }
+  }, [deviceOptionId]);
+
+  useEffect(() => {
+    window.localStorage.setItem(CLIENT_INSTALLED_STORAGE_KEY, clientInstalled ? '1' : '0');
+  }, [clientInstalled]);
+
+  useEffect(() => {
+    if (peer?.access_uri) {
+      setClientInstalled(true);
+    }
+  }, [peer]);
 
   async function loadProfile(options = {}) {
     if (!tgContext) return;
@@ -295,8 +382,17 @@ export default function App() {
         });
         if (result?.peer) {
           setPeer(result.peer);
+          setClientInstalled(true);
         }
         await loadProfile({ silent: true });
+        if (result?.peer?.access_uri) {
+          setStatusLine('VPN готов. Открываем приложение…');
+          setTimeout(() => {
+            window.location.href = result.peer.access_uri;
+          }, 150);
+          return;
+        }
+        setStatusLine('VPN готов к подключению');
       });
     } catch (err) {
       setError(err.message);
@@ -358,7 +454,37 @@ export default function App() {
       return;
     }
 
+    setStatusLine('Открываем VPN в приложении…');
     window.location.href = peer.access_uri;
+  }
+
+  function handleChooseDevice(optionId) {
+    setDeviceOptionId(optionId);
+    if (!peer) {
+      setClientInstalled(false);
+    }
+    setError('');
+  }
+
+  function handleInstallClient() {
+    if (!selectedDevice) {
+      setError('Сначала выберите устройство.');
+      return;
+    }
+
+    setStatusLine(`Установите ${selectedDevice.clientName}, затем вернитесь сюда.`);
+    window.open(selectedDevice.downloadUrl, '_blank', 'noreferrer');
+  }
+
+  function handleClientInstalled() {
+    if (!selectedDevice) {
+      setError('Сначала выберите устройство.');
+      return;
+    }
+
+    setClientInstalled(true);
+    setError('');
+    setStatusLine(`${selectedDevice.clientName} установлен. Осталось подключить VPN.`);
   }
 
   async function handleCreatePayment(tariffCode) {
@@ -571,6 +697,14 @@ export default function App() {
           <p className="muted">{statusLine}</p>
         </header>
         {error && <section className="card error">{error}</section>}
+        <section className="card">
+          <h2>Документы и контакты</h2>
+          <div className="actions">
+            <a className="button button--secondary" href={legalLinks.privacy} target="_blank" rel="noreferrer">Политика конфиденциальности</a>
+            <a className="button button--secondary" href={legalLinks.terms} target="_blank" rel="noreferrer">Пользовательское соглашение</a>
+            <a className="button button--secondary" href={legalLinks.contact} target="_blank" rel="noreferrer">Контакты и поддержка</a>
+          </div>
+        </section>
       </div>
     );
   }
@@ -589,7 +723,7 @@ export default function App() {
         <button className={activeTab === 'billing' ? 'tab tab--active' : 'tab'} onClick={() => setActiveTab('billing')}>Тарифы</button>
         <button className={activeTab === 'referral' ? 'tab tab--active' : 'tab'} onClick={() => setActiveTab('referral')}>Бонусы</button>
         <button className={activeTab === 'servers' ? 'tab tab--active' : 'tab'} onClick={() => setActiveTab('servers')}>Серверы</button>
-        <button className={activeTab === 'support' ? 'tab tab--active' : 'tab'} onClick={() => setActiveTab('support')}>Инструкция</button>
+        <button className={activeTab === 'support' ? 'tab tab--active' : 'tab'} onClick={() => setActiveTab('support')}>Помощь</button>
         {isAdmin && (
           <button className={activeTab === 'admin' ? 'tab tab--active' : 'tab'} onClick={() => setActiveTab('admin')}>Админка</button>
         )}
@@ -629,51 +763,126 @@ export default function App() {
           </section>
 
           <section className="card">
-            <h2>Подключение</h2>
-            <p className="muted">Сначала выберите сервер, затем создайте профиль доступа.</p>
-            <div className="server-select">
-              <label className="label">VPN сервер</label>
-              <select
-                className="input"
-                value={selectedServerId}
-                onChange={(event) => setSelectedServerId(event.target.value)}
-              >
-                {servers.map((server, index) => (
-                  <option key={server.id} value={server.id}>
-                    {formatServerTitle(index)} • {formatServerLocation(server.location)}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="actions">
-              <button
-                className="button"
-                onClick={handleConnect}
-                disabled={isBusy || Boolean(peer) || !selectedServerId || !profile.has_active_access}
-              >
-                {isBusy ? 'Подождите…' : 'Создать профиль'}
-              </button>
-            </div>
-          </section>
-          <section className="card">
-            <h2>Мои подключения</h2>
-            {!peer && <p className="muted">У вас пока нет активных подключений.</p>}
-            {peer && (
-              <div className="admin-item">
-                <div>
-                  <strong>{peer.name}</strong> ({peer.protocol || 'VPN'})
-                  <br />
-                  Идентификатор: {peer.ip || '—'}
-                  <br />
-                  <span className="muted">{peer.access_uri || 'Ссылка подключения недоступна'}</span>
-                </div>
-                <div className="admin-actions">
-                  <button className="button button--secondary" onClick={handleCopyAccessUri} disabled={isBusy}>Скопировать ссылку</button>
-                  <button className="button button--secondary" onClick={handleOpenInClient} disabled={isBusy}>Открыть в клиенте</button>
-                  <button className="button button--secondary" onClick={handleDownload} disabled={isBusy}>{isBusy ? 'Подождите…' : 'Обновить ссылку'}</button>
-                  <button className="button button--secondary" onClick={handleRemove} disabled={isBusy}>{isBusy ? 'Подождите…' : 'Удалить профиль'}</button>
+            <h2>Подключить VPN</h2>
+            <p className="muted">
+              Здесь всего три шага: выберите устройство, установите приложение и нажмите кнопку подключения.
+            </p>
+
+            <div className="step-list">
+              <div className={`step-card ${selectedDevice ? 'step-card--done' : ''}`}>
+                <span className="step-card__number">1</span>
+                <div className="step-card__content">
+                  <strong>Выберите устройство</strong>
+                  <span>{selectedDevice ? `Сейчас выбрано: ${selectedDevice.label}` : 'Покажем только нужную кнопку установки.'}</span>
                 </div>
               </div>
+              <div className={`step-card ${clientInstalled ? 'step-card--done' : ''}`}>
+                <span className="step-card__number">2</span>
+                <div className="step-card__content">
+                  <strong>Установите приложение</strong>
+                  <span>{selectedDevice ? `${selectedDevice.clientName} нужен один раз.` : 'Сначала выберите устройство.'}</span>
+                </div>
+              </div>
+              <div className={`step-card ${peer ? 'step-card--done' : ''}`}>
+                <span className="step-card__number">3</span>
+                <div className="step-card__content">
+                  <strong>Подключите VPN</strong>
+                  <span>{peer ? 'VPN уже готов. Можно открывать приложение.' : 'Мы создадим подключение автоматически.'}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="device-grid">
+              {CLIENT_OPTIONS.map((option) => (
+                <button
+                  key={option.id}
+                  className={deviceOptionId === option.id ? 'button device-button device-button--active' : 'button button--secondary device-button'}
+                  onClick={() => handleChooseDevice(option.id)}
+                  disabled={isBusy}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+
+            {selectedDevice && (
+              <div className="onboarding-panel">
+                <div className="onboarding-panel__header">
+                  <strong>{selectedDevice.label}</strong>
+                  <span className="muted">Рекомендуем {selectedDevice.clientName}</span>
+                </div>
+                {!clientInstalled && (
+                  <div className="actions">
+                    <button className="button" onClick={handleInstallClient} disabled={isBusy}>Установить приложение</button>
+                    <button className="button button--secondary" onClick={handleClientInstalled} disabled={isBusy}>Приложение уже установлено</button>
+                  </div>
+                )}
+                {clientInstalled && !peer && (
+                  <div className="actions">
+                    <button
+                      className="button"
+                      onClick={handleConnect}
+                      disabled={isBusy || !canConnectNow}
+                    >
+                      {isBusy ? 'Подождите…' : 'Подключить VPN'}
+                    </button>
+                    <button className="button button--secondary" onClick={() => setClientInstalled(false)} disabled={isBusy}>
+                      Выбрать другое устройство
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {!selectedDevice && (
+              <p className="muted">Если вы открыли mini app с телефона, устройство обычно определится автоматически.</p>
+            )}
+
+            {hasMultipleServers && (
+              <div className="server-select">
+                <label className="label">Сервер</label>
+                <select
+                  className="input"
+                  value={selectedServerId}
+                  onChange={(event) => setSelectedServerId(event.target.value)}
+                >
+                  {servers.map((server, index) => (
+                    <option key={server.id} value={server.id}>
+                      {formatServerTitle(index)} • {formatServerLocation(server.location)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+            {selectedServer && (
+              <p className="muted">
+                {hasMultipleServers ? 'Выбранный сервер' : 'Сервер по умолчанию'}: {formatServerLocation(selectedServer.location)}
+              </p>
+            )}
+            {!profile.has_active_access && (
+              <p className="billing-alert">Сначала активируйте тариф, затем сможете подключить VPN.</p>
+            )}
+          </section>
+
+          <section className="card">
+            <h2>{peer ? 'VPN готов' : 'Если что-то не получилось'}</h2>
+            {!peer && (
+              <p className="muted">
+                Если приложение уже установлено, но подключение не запускается, откройте вкладку «Помощь» или напишите в поддержку.
+              </p>
+            )}
+            {peer && (
+              <>
+                <p className="muted">
+                  Если приложение не открылось автоматически, нажмите кнопку ниже. В крайнем случае скопируйте ссылку и вставьте её в клиент вручную.
+                </p>
+                <div className="admin-actions">
+                  <button className="button" onClick={handleOpenInClient} disabled={isBusy}>Открыть VPN</button>
+                  <button className="button button--secondary" onClick={handleCopyAccessUri} disabled={isBusy}>Скопировать ссылку</button>
+                  <button className="button button--secondary" onClick={handleDownload} disabled={isBusy}>{isBusy ? 'Подождите…' : 'Обновить подключение'}</button>
+                  <button className="button button--secondary" onClick={handleRemove} disabled={isBusy}>{isBusy ? 'Подождите…' : 'Сбросить подключение'}</button>
+                </div>
+              </>
             )}
           </section>
 
@@ -681,6 +890,17 @@ export default function App() {
             <h2>Поддержка</h2>
             <p>Если есть вопросы по доступу или оплате, пишите в поддержку.</p>
             <a className="link" href="https://t.me/vpnguardsupport" target="_blank" rel="noreferrer">@vpnguardsupport</a>
+            <div className="actions" style={{ marginTop: 12 }}>
+              <a className="button button--secondary" href={legalLinks.contact} target="_blank" rel="noreferrer">Контакты и форма обращения</a>
+            </div>
+          </section>
+
+          <section className="card">
+            <h2>Документы</h2>
+            <div className="actions">
+              <a className="button button--secondary" href={legalLinks.privacy} target="_blank" rel="noreferrer">Политика конфиденциальности</a>
+              <a className="button button--secondary" href={legalLinks.terms} target="_blank" rel="noreferrer">Пользовательское соглашение</a>
+            </div>
           </section>
         </>
       )}
@@ -997,22 +1217,30 @@ export default function App() {
       {activeTab === 'support' && (
         <>
           <section className="card">
-            <h2>Инструкция</h2>
+            <h2>Быстрое подключение</h2>
             <ol className="instructions">
-              <li>Скачайте и установите приложение v2RayTun.</li>
-              <li>В разделе «Главная» нажмите «Создать профиль».</li>
-              <li>Нажмите «Скопировать ссылку».</li>
-              <li>Откройте v2RayTun, добавьте новый профиль и вставьте туда URL подключения.</li>
+              <li>Откройте вкладку «Главная» и выберите своё устройство.</li>
+              <li>Нажмите «Установить приложение» и поставьте v2RayTun.</li>
+              <li>Вернитесь в mini app и нажмите «Подключить VPN».</li>
+              <li>Если приложение не открылось само, используйте кнопку «Скопировать ссылку».</li>
             </ol>
             <div className="admin-item">
-              <div><strong>Скачать v2RayTun</strong></div>
-              <a className="link" href="https://apps.apple.com/ru/app/v2raytun/id6476628951" target="_blank" rel="noreferrer">iPhone / iPad</a>
-              <a className="link" href="https://play.google.com/store/apps/details?id=com.v2raytun.android&hl=ru" target="_blank" rel="noreferrer">Android</a>
-              <a className="link" href="https://v2raytun.com/" target="_blank" rel="noreferrer">Windows / macOS</a>
+              <div><strong>Скачать приложение</strong></div>
+              {CLIENT_OPTIONS.map((option) => (
+                <a key={option.id} className="link" href={option.downloadUrl} target="_blank" rel="noreferrer">
+                  {option.label}
+                </a>
+              ))}
             </div>
             <div className="admin-item">
               <div><strong>Telegram-канал</strong></div>
               <a className="link" href="https://t.me/+0Dpn_XGJPJcwOTJi" target="_blank" rel="noreferrer">Перейти в канал</a>
+            </div>
+            <div className="admin-item">
+              <div><strong>Документы и контакты</strong></div>
+              <a className="link" href={legalLinks.privacy} target="_blank" rel="noreferrer">Политика конфиденциальности</a>
+              <a className="link" href={legalLinks.terms} target="_blank" rel="noreferrer">Пользовательское соглашение</a>
+              <a className="link" href={legalLinks.contact} target="_blank" rel="noreferrer">Контакты и форма обращения</a>
             </div>
             <p className="muted">После добавления профиля включите подключение внутри v2RayTun.</p>
           </section>

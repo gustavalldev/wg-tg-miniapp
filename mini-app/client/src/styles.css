@@ -236,6 +236,81 @@ body {
   gap: 12px;
 }
 
+.step-list {
+  display: grid;
+  gap: 10px;
+  margin: 16px 0;
+}
+
+.step-card {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 12px;
+  align-items: start;
+  padding: 14px;
+  border: 1px solid #e6eaf2;
+  border-radius: 14px;
+  background: #fbfcff;
+}
+
+.step-card--done {
+  border-color: #cfe2ff;
+  background: #f3f8ff;
+}
+
+.step-card__number {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #2f5cff;
+  color: #fff;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.step-card__content {
+  display: grid;
+  gap: 4px;
+}
+
+.step-card__content span {
+  color: #666b7a;
+  line-height: 1.5;
+}
+
+.device-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 16px 0;
+}
+
+.device-button {
+  min-height: 48px;
+}
+
+.device-button--active {
+  box-shadow: 0 10px 24px rgba(47, 92, 255, 0.18);
+}
+
+.onboarding-panel {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 14px;
+  background: #f7f9fc;
+  border: 1px solid #e6eaf2;
+  margin-bottom: 12px;
+}
+
+.onboarding-panel__header {
+  display: grid;
+  gap: 4px;
+}
+
 .plan-current {
   margin-bottom: 14px;
   padding: 12px 14px;
@@ -342,6 +417,10 @@ body {
   }
 
   .metrics-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .device-grid {
     grid-template-columns: 1fr;
   }
 }

@@ -32,7 +32,7 @@ Copy project there, then create `.env` from `.env.server.example` and fill:
 
 - `TELEGRAM_TOKEN`
 - `WEBAPP_URL`
-- `VITE_API_BASE`
+- `VITE_API_BASE` (`https://vpn.ordbox.ru`, без суффикса `/api`)
 - postgres passwords
 - real `SERVERS_JSON`
 - real `VPN_BACKEND_NODES_JSON`

@@ -48,7 +48,7 @@ bot.use(async (ctx, next) => {
 const mainMenuMarkup = {
     reply_markup: {
         inline_keyboard: [
-            [{ text: 'Открыть приложение', web_app: { url: WEBAPP_URL } }],
+            [{ text: 'Подключить VPN', web_app: { url: WEBAPP_URL } }],
             [{ text: 'Поддержка', callback_data: 'help' }]
         ]
     }
@@ -232,11 +232,11 @@ bot.start(async (ctx) => {
             { source: 'media/logo_bot.png' },
             {
                 caption:
-                    'VPN_GuardBot — смотри тикток (и не только) без проблем.\n\n' +
-                    '🔓 Доступ ко всем социальным сетям\n' +
-                    '🕒 Работает 24/7\n' +
-                    '🚀 Быстрая скорость\n\n' +
-                    'Откройте приложение для управления профилем доступа.',
+                    'VPN_GuardBot — подключение за пару минут.\n\n' +
+                    '1. Нажмите «Подключить VPN»\n' +
+                    '2. Выберите своё устройство\n' +
+                    '3. Установите приложение и нажмите «Подключить VPN» ещё раз\n\n' +
+                    'Если что-то не получится, поддержка рядом.',
                 ...mainMenuMarkup
             }
         );
@@ -267,7 +267,7 @@ async function startBot() {
     try {
         await ensureBotSchema();
         await bot.telegram.setMyCommands([
-            { command: 'start', description: 'Открыть приложение' },
+            { command: 'start', description: 'Подключить VPN' },
             { command: 'help', description: 'Поддержка' }
         ]);
     } catch (err) {

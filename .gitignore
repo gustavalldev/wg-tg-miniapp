@@ -50,6 +50,7 @@ coverage/
 # Temporary files
 tmp/
 temp/ 
+mini-app/data/
 
 setup-wireguard-server.sh
 speed-test.bat
