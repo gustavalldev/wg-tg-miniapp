@@ -39,6 +39,8 @@ const PAYMENT_PROVIDER = process.env.PAYMENT_PROVIDER || 'manual';
 const SUPPORT_USERNAME = process.env.SUPPORT_USERNAME || 'vpnguardsupport';
 const PROMO_TARIFF_CODE = process.env.PROMO_TARIFF_CODE || 'promo-access';
 const PERSONAL_ADMIN_MODE = process.env.PERSONAL_ADMIN_MODE === 'true';
+const PERSONAL_TELEGRAM_ID_MIN = 900000000000000;
+const PERSONAL_TELEGRAM_ID_MAX = 999999999999999;
 
 const pool = new Pool({
   host: process.env.PG_HOST,
@@ -168,6 +170,23 @@ function normalizeUsernameInput(value) {
 
   if (!/^[a-zA-Z0-9_]{2,32}$/.test(normalized)) {
     throw new Error('username может содержать только латиницу, цифры и underscore');
+  }
+
+  return normalized;
+}
+
+function normalizeConnectionNameInput(value) {
+  const normalized = String(value || '').trim().replace(/\s+/g, ' ');
+  if (!normalized) {
+    throw new Error('Введите название подключения');
+  }
+
+  if (normalized.length < 2 || normalized.length > 64) {
+    throw new Error('Название подключения должно быть от 2 до 64 символов');
+  }
+
+  if (/[\u0000-\u001f\u007f]/.test(normalized)) {
+    throw new Error('Название подключения содержит недопустимые символы');
   }
 
   return normalized;
@@ -671,6 +690,19 @@ async function ensureLocalAdminUser({ telegramId, username }) {
   );
 
   return result.rows[0];
+}
+
+async function generatePersonalTelegramId() {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const telegramId = crypto.randomInt(PERSONAL_TELEGRAM_ID_MIN, PERSONAL_TELEGRAM_ID_MAX);
+    const existing = await pool.query(
+      'SELECT 1 FROM users WHERE telegram_id = $1 LIMIT 1',
+      [telegramId]
+    );
+    if (existing.rowCount === 0) return telegramId;
+  }
+
+  throw new Error('Не удалось сгенерировать внутренний id подключения');
 }
 
 async function getAdminUserByTelegramId(telegramId) {
@@ -1549,8 +1581,13 @@ app.post('/api/webapp/admin/create-user', async (req, res) => {
     const auth = await requireAdmin(req, res);
     if (!auth) return;
 
-    const telegramId = normalizeTelegramId(req.body.telegram_id);
-    const username = normalizeUsernameInput(req.body.username);
+    const useConnectionName = PERSONAL_ADMIN_MODE && req.body.connection_name !== undefined;
+    const telegramId = useConnectionName
+      ? await generatePersonalTelegramId()
+      : normalizeTelegramId(req.body.telegram_id);
+    const username = useConnectionName
+      ? normalizeConnectionNameInput(req.body.connection_name)
+      : normalizeUsernameInput(req.body.username);
     const user = await ensureLocalAdminUser({ telegramId, username });
 
     res.json({ ok: true, user });

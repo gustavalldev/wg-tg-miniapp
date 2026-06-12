@@ -69,9 +69,9 @@ function formatServerEndpoint(server) {
   return host === '—' ? host : `${host}:8443`;
 }
 
-function formatConnectionOwner(peerItem) {
-  if (!peerItem) return '—';
-  return peerItem.username ? `@${peerItem.username}` : String(peerItem.telegram_id || '—');
+function formatConnectionName(item) {
+  if (!item) return '—';
+  return item.username || item.name || `Подключение ${item.telegram_id || '—'}`;
 }
 
 function normalizeServerStatus(status) {
@@ -202,6 +202,7 @@ export default function App() {
   const [adminMetrics, setAdminMetrics] = useState(null);
   const [adminTab, setAdminTab] = useState('overview');
   const [newUserForm, setNewUserForm] = useState({
+    connection_name: '',
     telegram_id: '',
     username: ''
   });
@@ -682,20 +683,31 @@ export default function App() {
   }
 
   async function handleCreateLocalUser() {
-    if (!newUserForm.telegram_id.trim()) {
+    const connectionName = newUserForm.connection_name.trim();
+
+    if (PERSONAL_ADMIN_MODE) {
+      if (!connectionName) {
+        setError('Введите название подключения.');
+        return;
+      }
+    } else if (!newUserForm.telegram_id.trim()) {
       setError('Введите Telegram ID пользователя.');
       return;
     }
 
     try {
-      await runWithBusy('Добавляем пользователя…', async () => {
-        await postJson('/api/webapp/admin/create-user', getAuthPayload({
-          telegram_id: newUserForm.telegram_id.trim(),
-          username: newUserForm.username.trim()
-        }));
-        setNewUserForm({ telegram_id: '', username: '' });
+      await runWithBusy(PERSONAL_ADMIN_MODE ? 'Добавляем подключение…' : 'Добавляем пользователя…', async () => {
+        const payload = PERSONAL_ADMIN_MODE
+          ? { connection_name: connectionName }
+          : {
+              telegram_id: newUserForm.telegram_id.trim(),
+              username: newUserForm.username.trim()
+            };
+
+        await postJson('/api/webapp/admin/create-user', getAuthPayload(payload));
+        setNewUserForm({ connection_name: '', telegram_id: '', username: '' });
         await refreshAdminData();
-        setStatusLine('Пользователь добавлен');
+        setStatusLine(PERSONAL_ADMIN_MODE ? 'Подключение добавлено' : 'Пользователь добавлен');
       });
     } catch (err) {
       setError(err.message);
@@ -745,7 +757,7 @@ export default function App() {
           server_id: getUserSelectedServerId(user.telegram_id) || null
         }));
         if (PERSONAL_ADMIN_MODE && result?.peer?.access_uri) {
-          await copyPeerAddress(result.peer, `Профиль создан и адрес скопирован для @${user.username || user.telegram_id}`);
+          await copyPeerAddress(result.peer, `Профиль создан и адрес скопирован: ${formatConnectionName(user)}`);
         } else if (result?.config) {
           downloadConfigFile(result.config, result.download_name, result.mime_type);
         }
@@ -769,7 +781,7 @@ export default function App() {
           server_id: serverIdOverride || getUserSelectedServerId(user.telegram_id) || null
         }));
         if (PERSONAL_ADMIN_MODE && result?.peer?.access_uri) {
-          await copyPeerAddress(result.peer, `Профиль перевыпущен и адрес скопирован для @${user.username || user.telegram_id}`);
+          await copyPeerAddress(result.peer, `Профиль перевыпущен и адрес скопирован: ${formatConnectionName(user)}`);
         } else if (result?.config) {
           downloadConfigFile(result.config, result.download_name, result.mime_type);
         }
@@ -1001,7 +1013,7 @@ export default function App() {
                 {activePeers.map(peerItem => (
                   <div key={peerItem.name} className="admin-item connection-card">
                     <div className="server-row">
-                      <strong>{formatConnectionOwner(peerItem)}</strong>
+                      <strong>{formatConnectionName(peerItem)}</strong>
                       <span className="muted">{peerItem.name}</span>
                       <span className={`status-pill status-pill--${peerItem.active === false ? 'offline' : 'online'}`}>
                         {peerItem.active === false ? 'Отключён' : 'Активен'}
@@ -1033,24 +1045,18 @@ export default function App() {
 
             <section className="card">
               <div className="section-heading">
-                <h2>Пользователи</h2>
+                <h2>Профили доступа</h2>
                 <span className="muted">{users.length} в списке</span>
               </div>
               <div className="admin-panel">
-                <h3>Добавить пользователя</h3>
-                <div className="admin-controls admin-controls--three">
+                <h3>Добавить подключение</h3>
+                <div className="admin-controls">
                   <input
                     className="input"
-                    inputMode="numeric"
-                    placeholder="Telegram ID"
-                    value={newUserForm.telegram_id}
-                    onChange={(event) => setNewUserForm(prev => ({ ...prev, telegram_id: event.target.value }))}
-                  />
-                  <input
-                    className="input"
-                    placeholder="username без @"
-                    value={newUserForm.username}
-                    onChange={(event) => setNewUserForm(prev => ({ ...prev, username: event.target.value }))}
+                    placeholder="Название подключения"
+                    value={newUserForm.connection_name}
+                    onChange={(event) => setNewUserForm(prev => ({ ...prev, connection_name: event.target.value }))}
+                    onKeyDown={(event) => event.key === 'Enter' && handleCreateLocalUser()}
                   />
                   <button className="button" onClick={handleCreateLocalUser} disabled={isBusy}>
                     Добавить
@@ -1060,7 +1066,7 @@ export default function App() {
               <div className="admin-controls">
                 <input
                   className="input"
-                  placeholder="Поиск по username или id"
+                  placeholder="Поиск по названию"
                   value={usersSearch}
                   onChange={(event) => setUsersSearch(event.target.value)}
                   onKeyDown={(event) => event.key === 'Enter' && loadAdminUsers()}
@@ -1076,8 +1082,7 @@ export default function App() {
                   return (
                     <div key={user.telegram_id} className="admin-item">
                       <div className="server-row">
-                        <strong>@{user.username || '—'}</strong>
-                        <span className="muted">id: {user.telegram_id}</span>
+                        <strong>{formatConnectionName(user)}</strong>
                         <span className={`status-pill status-pill--${user.vpn_status === 'blocked' ? 'offline' : 'online'}`}>
                           {user.vpn_status === 'blocked' ? 'Отключён' : 'Активен'}
                         </span>
