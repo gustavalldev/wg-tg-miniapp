@@ -964,7 +964,7 @@ export default function App() {
                 <strong>{formatMetricValue(activePeers.length)}</strong>
               </div>
               <div className="metric-card">
-                <span className="muted">Пользователей</span>
+                <span className="muted">Профилей</span>
                 <strong>{formatMetricValue(users.length)}</strong>
               </div>
             </section>
