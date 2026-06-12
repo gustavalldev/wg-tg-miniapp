@@ -24,7 +24,7 @@ services:
       - VPN_PROVIDER_MODE=remote-http
       - VPN_BACKEND_URL=http://foreign-vless-provisioner:3021
       - VPN_BACKEND_TOKEN=${VPN_BACKEND_TOKEN:-}
-      - VPN_BACKEND_TIMEOUT_MS=${VPN_BACKEND_TIMEOUT_MS:-10000}
+      - VPN_BACKEND_TIMEOUT_MS=${VPN_BACKEND_TIMEOUT_MS:-30000}
       - PG_HOST=postgres
       - PG_PORT=5432
       - PG_DATABASE=${POSTGRES_DB}
