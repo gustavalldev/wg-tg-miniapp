@@ -130,8 +130,12 @@ function downloadConfigFile(config, fileName = 'vpn-profile.json', mimeType = 'a
 
 async function copyToClipboard(value) {
   if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(value);
-    return;
+    try {
+      await navigator.clipboard.writeText(value);
+      return;
+    } catch (_error) {
+      // Fall back to the textarea path below when browser permissions block Clipboard API.
+    }
   }
 
   const textarea = document.createElement('textarea');
