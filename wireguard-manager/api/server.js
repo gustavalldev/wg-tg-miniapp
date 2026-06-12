@@ -715,9 +715,9 @@ async function createAdminAccessProfile({ telegramId, serverId, replaceExisting,
   }
 
   const telegramUser = dbUserToTelegramUser(user);
-  const existingPeer = await getUserPeerByUserId(user.id);
+  const existingPeer = await getUserPeerByUserId(user.id, selectedServer.id);
   if (existingPeer && !replaceExisting) {
-    throw new Error('У пользователя уже есть активный профиль');
+    throw new Error('У пользователя уже есть активный профиль на выбранном сервере');
   }
 
   if (existingPeer) {
@@ -1040,8 +1040,8 @@ async function enforceActiveAccess(userDbId, telegramUser, req = null) {
     return profile;
   }
 
-  const peer = await getUserPeerByUserId(userDbId);
-  if (peer) {
+  const peers = await getUserPeersByUserId(userDbId);
+  for (const peer of peers) {
     await revokePeerAccess(peer, telegramUser);
     if (req) {
       await logAction(userDbId, peer.name, 'access_revoked_expired', {}, req);
@@ -1070,7 +1070,11 @@ function normalizePeer(row) {
   };
 }
 
-async function getUserPeerByUserId(userId) {
+async function getUserPeerByUserId(userId, serverId = null) {
+  const params = serverId ? [userId, serverId] : [userId];
+  const profileServerFilter = serverId ? 'AND COALESCE(server_id, route_id) = $2' : '';
+  const peerServerFilter = serverId ? 'AND (server_id = $2 OR route_id = $2)' : '';
+
   try {
     const accessProfiles = await pool.query(
       `SELECT profile_name AS name,
@@ -1083,9 +1087,10 @@ async function getUserPeerByUserId(userId) {
               profile_format
        FROM access_profiles
        WHERE user_id = $1 AND active = true
+       ${profileServerFilter}
        ORDER BY created_at
        LIMIT 1`,
-      [userId]
+      params
     );
     if (accessProfiles.rows.length > 0) {
       return normalizePeer(accessProfiles.rows[0]);
@@ -1098,11 +1103,47 @@ async function getUserPeerByUserId(userId) {
     `SELECT name, ip, protocol, access_uri, config_payload, server_id, route_id
      FROM peers
      WHERE user_id = $1 AND active = true
+     ${peerServerFilter}
      ORDER BY created_at
      LIMIT 1`,
-    [userId]
+    params
   );
   return normalizePeer(res.rows[0] || null);
+}
+
+async function getUserPeersByUserId(userId) {
+  const res = await pool.query(
+    `SELECT name, ip, protocol, access_uri, config_payload, server_id, route_id
+     FROM peers
+     WHERE user_id = $1 AND active = true
+     ORDER BY created_at`,
+    [userId]
+  );
+  if (res.rows.length > 0) {
+    return res.rows.map(normalizePeer);
+  }
+
+  try {
+    const accessProfiles = await pool.query(
+      `SELECT profile_name AS name,
+              COALESCE(server_id, route_id) AS server_id,
+              route_id,
+              profile_token AS ip,
+              protocol,
+              access_uri,
+              config_payload,
+              profile_format
+       FROM access_profiles
+       WHERE user_id = $1 AND active = true
+       ORDER BY created_at`,
+      [userId]
+    );
+    return accessProfiles.rows.map(normalizePeer);
+  } catch (error) {
+    console.warn('Не удалось получить список access_profiles:', error.message);
+  }
+
+  return [];
 }
 
 function sanitizeName(value) {
@@ -1145,8 +1186,10 @@ async function logAction(userId, peerName, action, details = {}, req) {
 }
 
 async function createAccessProfileForUser(userDbId, telegramUser, req, server) {
+  const baseName = sanitizeName(telegramUser.username || `user-${telegramUser.id}`);
+  const serverName = sanitizeName(server.id || server.route_id || 'server');
   const profile = {
-    name: `${sanitizeName(telegramUser.username || `user-${telegramUser.id}`)}-${telegramUser.id}`,
+    name: `${baseName}-${telegramUser.id}-${serverName}`,
     id: `${server.id}-${crypto.randomBytes(4).toString('hex')}`,
     token: crypto.randomBytes(16).toString('hex')
   };
@@ -1740,7 +1783,7 @@ app.post('/api/webapp/admin/peers', async (req, res) => {
 
     const peers = await pool.query(
       `SELECT p.name, p.ip, p.protocol, p.created_at, p.active, p.access_uri,
-              p.server_id, p.route_id, s.name AS server_name, s.location AS server_location,
+              p.server_id, p.route_id, s.name AS server_name, s.location AS server_location, s.host AS server_host,
               u.username, u.telegram_id
        FROM peers p
        LEFT JOIN users u ON p.user_id = u.id

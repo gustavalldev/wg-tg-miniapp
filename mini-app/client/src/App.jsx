@@ -58,6 +58,22 @@ function formatServerLocation(location) {
   return location;
 }
 
+function formatServerLabel(server, index) {
+  const location = formatServerLocation(server?.location);
+  if (location !== 'Локация неизвестна') return location;
+  return server?.name || formatServerTitle(index);
+}
+
+function formatServerEndpoint(server) {
+  const host = server?.host || server?.entry_host || server?.ip || '—';
+  return host === '—' ? host : `${host}:8443`;
+}
+
+function formatConnectionOwner(peerItem) {
+  if (!peerItem) return '—';
+  return peerItem.username ? `@${peerItem.username}` : String(peerItem.telegram_id || '—');
+}
+
 function normalizeServerStatus(status) {
   const normalized = String(status || '').toLowerCase();
   if (['online', 'active', 'running', 'healthy', 'up'].includes(normalized)) {
@@ -165,6 +181,7 @@ export default function App() {
   const [profile, setProfile] = useState(defaultProfile);
   const [peer, setPeer] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [authLoaded, setAuthLoaded] = useState(false);
   const [users, setUsers] = useState([]);
   const [peers, setPeers] = useState([]);
   const [usersSearch, setUsersSearch] = useState('');
@@ -215,6 +232,10 @@ export default function App() {
   const selectedServer = useMemo(
     () => servers.find((server) => server.id === selectedServerId) || servers[0] || null,
     [servers, selectedServerId]
+  );
+  const activePeers = useMemo(
+    () => peers.filter((peerItem) => peerItem.active !== false),
+    [peers]
   );
   const defaultAdminServerId = useMemo(
     () => selectedServerId || servers.find((server) => server.is_default)?.id || servers[0]?.id || '',
@@ -322,6 +343,7 @@ export default function App() {
       setSubscribed(false);
       setStatusLine('VPN Guard');
       setIsAdmin(false);
+      setAuthLoaded(true);
       return;
     }
 
@@ -333,6 +355,7 @@ export default function App() {
     setReferral(data.referral || null);
     setPendingPayment(data.pending_payment || null);
     setStatusLine(`Привет, ${data.user?.first_name || 'друг'}!`);
+    setAuthLoaded(true);
   }
 
   async function loadServers() {
@@ -389,7 +412,10 @@ export default function App() {
 
   useEffect(() => {
     if (!tgContext) return;
-    loadProfile().catch(err => setError(err.message));
+    loadProfile().catch(err => {
+      setError(err.message);
+      setAuthLoaded(true);
+    });
     loadServers().catch(err => setError(err.message));
   }, [tgContext]);
 
@@ -486,6 +512,27 @@ export default function App() {
     } catch (err) {
       setError('Не удалось скопировать ссылку.');
     }
+  }
+
+  async function copyPeerAddress(peerItem, successMessage = 'Адрес подключения скопирован') {
+    if (!peerItem?.access_uri) {
+      setError('Адрес подключения недоступен.');
+      return false;
+    }
+
+    try {
+      await copyToClipboard(peerItem.access_uri);
+      setError('');
+      setStatusLine(successMessage);
+      return true;
+    } catch (_err) {
+      setError('Не удалось скопировать адрес подключения.');
+      return false;
+    }
+  }
+
+  async function handleCopyPeerAccessUri(peerItem) {
+    await copyPeerAddress(peerItem, `Адрес скопирован: ${peerItem.name}`);
   }
 
   function handleOpenInClient() {
@@ -651,6 +698,41 @@ export default function App() {
     }
   }
 
+  async function handleRefreshPersonalDashboard() {
+    try {
+      await runWithBusy('Обновляем данные…', async () => {
+        await Promise.all([
+          loadServers(),
+          refreshAdminData(),
+          loadProfile({ silent: true })
+        ]);
+        setStatusLine('Данные обновлены');
+      });
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  function getPeersForUser(user) {
+    return activePeers.filter(peerItem => String(peerItem.telegram_id) === String(user.telegram_id));
+  }
+
+  function getPeerForUserOnServer(user, serverId) {
+    return getPeersForUser(user).find(peerItem => (
+      peerItem.server_id === serverId || peerItem.route_id === serverId
+    )) || null;
+  }
+
+  function handleOpenPeerInClient(peerItem) {
+    if (!peerItem?.access_uri) {
+      setError('Адрес подключения недоступен.');
+      return;
+    }
+
+    setStatusLine('Открываем VPN в приложении…');
+    window.location.href = peerItem.access_uri;
+  }
+
   async function handleCreateUserPeer(user) {
     try {
       await runWithBusy('Создаём профиль…', async () => {
@@ -658,31 +740,39 @@ export default function App() {
           telegram_id: Number(user.telegram_id),
           server_id: getUserSelectedServerId(user.telegram_id) || null
         }));
-        if (result?.config) {
+        if (PERSONAL_ADMIN_MODE && result?.peer?.access_uri) {
+          await copyPeerAddress(result.peer, `Профиль создан и адрес скопирован для @${user.username || user.telegram_id}`);
+        } else if (result?.config) {
           downloadConfigFile(result.config, result.download_name, result.mime_type);
         }
         await refreshAdminData();
-        setStatusLine(`Профиль создан для @${user.username || user.telegram_id}`);
+        if (!PERSONAL_ADMIN_MODE) {
+          setStatusLine(`Профиль создан для @${user.username || user.telegram_id}`);
+        }
       });
     } catch (err) {
       setError(err.message);
     }
   }
 
-  async function handleReissueUserPeer(user) {
+  async function handleReissueUserPeer(user, serverIdOverride = null) {
     if (!window.confirm('Перевыпустить профиль? Старое подключение будет отозвано.')) return;
 
     try {
       await runWithBusy('Перевыпускаем профиль…', async () => {
         const result = await postJson('/api/webapp/admin/reissue-peer', getAuthPayload({
           telegram_id: Number(user.telegram_id),
-          server_id: getUserSelectedServerId(user.telegram_id) || null
+          server_id: serverIdOverride || getUserSelectedServerId(user.telegram_id) || null
         }));
-        if (result?.config) {
+        if (PERSONAL_ADMIN_MODE && result?.peer?.access_uri) {
+          await copyPeerAddress(result.peer, `Профиль перевыпущен и адрес скопирован для @${user.username || user.telegram_id}`);
+        } else if (result?.config) {
           downloadConfigFile(result.config, result.download_name, result.mime_type);
         }
         await refreshAdminData();
-        setStatusLine(`Профиль перевыпущен для @${user.username || user.telegram_id}`);
+        if (!PERSONAL_ADMIN_MODE) {
+          setStatusLine(`Профиль перевыпущен для @${user.username || user.telegram_id}`);
+        }
       });
     } catch (err) {
       setError(err.message);
@@ -804,6 +894,242 @@ export default function App() {
             <a className="button button--secondary" href={legalLinks.contact} target="_blank" rel="noreferrer">Контакты и поддержка</a>
           </div>
         </section>
+      </div>
+    );
+  }
+
+  if (PERSONAL_ADMIN_MODE) {
+    return (
+      <div className="app app--admin-console">
+        <header className="app__header console-header">
+          <div>
+            <h1>VPN Guard</h1>
+            <p className="muted">{statusLine}</p>
+          </div>
+          {authLoaded && subscribed && isAdmin && (
+            <button className="button button--secondary" onClick={handleRefreshPersonalDashboard} disabled={isBusy}>
+              Обновить
+            </button>
+          )}
+        </header>
+
+        {isBusy && <section className="loading-notice">{busyMessage || 'Загрузка…'}</section>}
+
+        {!authLoaded && (
+          <section className="card">
+            <h2>Загрузка</h2>
+            <p className="muted">Проверяем доступ и получаем данные.</p>
+          </section>
+        )}
+
+        {authLoaded && !subscribed && (
+          <section className="card">
+            <h2>Нужна подписка</h2>
+            <div className="actions">
+              <a className="button" href={channelLink} target="_blank" rel="noreferrer">Перейти в канал</a>
+              <button className="button button--secondary" onClick={loadProfile} disabled={isBusy}>Проверить</button>
+            </div>
+          </section>
+        )}
+
+        {authLoaded && subscribed && !isAdmin && (
+          <section className="card error">Недостаточно прав для админки.</section>
+        )}
+
+        {authLoaded && subscribed && isAdmin && (
+          <>
+            <section className="console-summary">
+              <div className="metric-card">
+                <span className="muted">Серверов</span>
+                <strong>{formatMetricValue(servers.length)}</strong>
+              </div>
+              <div className="metric-card">
+                <span className="muted">Подключений</span>
+                <strong>{formatMetricValue(activePeers.length)}</strong>
+              </div>
+              <div className="metric-card">
+                <span className="muted">Пользователей</span>
+                <strong>{formatMetricValue(users.length)}</strong>
+              </div>
+            </section>
+
+            <section className="card">
+              <div className="section-heading">
+                <h2>Серверы</h2>
+                <span className="muted">{servers.length} активных</span>
+              </div>
+              <div className="server-card-grid">
+                {servers.length === 0 && <span className="muted">Нет данных</span>}
+                {servers.map((server, index) => {
+                  const status = normalizeServerStatus(server.status);
+                  return (
+                    <div key={server.id} className="server-card">
+                      <div className="server-row">
+                        <strong>{formatServerLabel(server, index)}</strong>
+                        {server.is_default && <span className="badge">Основной</span>}
+                        <span className={`status-pill status-pill--${status.tone}`}>{status.label}</span>
+                      </div>
+                      <div className="muted">{formatServerEndpoint(server)}</div>
+                      <div>{server.protocol || 'VPN'}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+
+            <section className="card">
+              <div className="section-heading">
+                <h2>Подключения</h2>
+                <span className="muted">{activePeers.length} активных</span>
+              </div>
+              <div className="admin-controls">
+                <input
+                  className="input"
+                  placeholder="Поиск по имени или username"
+                  value={peersSearch}
+                  onChange={(event) => setPeersSearch(event.target.value)}
+                  onKeyDown={(event) => event.key === 'Enter' && loadAdminPeers()}
+                />
+                <button className="button button--secondary" onClick={loadAdminPeers} disabled={isBusy}>Найти</button>
+              </div>
+              <div className="admin-list connection-list">
+                {activePeers.length === 0 && <span className="muted">Нет активных подключений</span>}
+                {activePeers.map(peerItem => (
+                  <div key={peerItem.name} className="admin-item connection-card">
+                    <div className="server-row">
+                      <strong>{formatConnectionOwner(peerItem)}</strong>
+                      <span className="muted">{peerItem.name}</span>
+                      <span className={`status-pill status-pill--${peerItem.active === false ? 'offline' : 'online'}`}>
+                        {peerItem.active === false ? 'Отключён' : 'Активен'}
+                      </span>
+                    </div>
+                    <div>
+                      Сервер: {formatServerLocation(peerItem.server_location)}
+                      {peerItem.server_host ? ` · ${peerItem.server_host}:8443` : ''}
+                    </div>
+                    <div className="muted">Профиль: {peerItem.ip || '—'} · {peerItem.protocol || 'VPN'}</div>
+                    <div className="admin-actions">
+                      <button className="button" onClick={() => handleCopyPeerAccessUri(peerItem)} disabled={isBusy}>
+                        Скопировать адрес
+                      </button>
+                      <button className="button button--secondary" onClick={() => handleOpenPeerInClient(peerItem)} disabled={isBusy}>
+                        Открыть
+                      </button>
+                      <button className="button button--secondary" onClick={() => handleReissueUserPeer(peerItem, peerItem.server_id || peerItem.route_id)} disabled={isBusy}>
+                        Перевыпустить
+                      </button>
+                      <button className="button button--secondary" onClick={() => handleDeletePeer(peerItem.name)} disabled={isBusy}>
+                        Удалить
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section className="card">
+              <div className="section-heading">
+                <h2>Пользователи</h2>
+                <span className="muted">{users.length} в списке</span>
+              </div>
+              <div className="admin-panel">
+                <h3>Добавить пользователя</h3>
+                <div className="admin-controls admin-controls--three">
+                  <input
+                    className="input"
+                    inputMode="numeric"
+                    placeholder="Telegram ID"
+                    value={newUserForm.telegram_id}
+                    onChange={(event) => setNewUserForm(prev => ({ ...prev, telegram_id: event.target.value }))}
+                  />
+                  <input
+                    className="input"
+                    placeholder="username без @"
+                    value={newUserForm.username}
+                    onChange={(event) => setNewUserForm(prev => ({ ...prev, username: event.target.value }))}
+                  />
+                  <button className="button" onClick={handleCreateLocalUser} disabled={isBusy}>
+                    Добавить
+                  </button>
+                </div>
+              </div>
+              <div className="admin-controls">
+                <input
+                  className="input"
+                  placeholder="Поиск по username или id"
+                  value={usersSearch}
+                  onChange={(event) => setUsersSearch(event.target.value)}
+                  onKeyDown={(event) => event.key === 'Enter' && loadAdminUsers()}
+                />
+                <button className="button button--secondary" onClick={loadAdminUsers} disabled={isBusy}>Найти</button>
+              </div>
+              <div className="admin-list">
+                {users.length === 0 && <span className="muted">Нет данных</span>}
+                {users.map(user => {
+                  const selectedUserServerId = getUserSelectedServerId(user.telegram_id);
+                  const selectedUserPeer = getPeerForUserOnServer(user, selectedUserServerId);
+                  const userPeers = getPeersForUser(user);
+                  return (
+                    <div key={user.telegram_id} className="admin-item">
+                      <div className="server-row">
+                        <strong>@{user.username || '—'}</strong>
+                        <span className="muted">id: {user.telegram_id}</span>
+                        <span className={`status-pill status-pill--${user.vpn_status === 'blocked' ? 'offline' : 'online'}`}>
+                          {user.vpn_status === 'blocked' ? 'Отключён' : 'Активен'}
+                        </span>
+                      </div>
+                      <div className="muted">
+                        Подключений: {userPeers.length || 0}
+                        {userPeers.length > 0 ? ` · ${userPeers.map(item => formatServerLocation(item.server_location)).join(', ')}` : ''}
+                      </div>
+                      {servers.length > 0 && (
+                        <div className="server-select compact-select">
+                          <label className="label" htmlFor={`server-${user.telegram_id}`}>Сервер</label>
+                          <select
+                            id={`server-${user.telegram_id}`}
+                            className="input"
+                            value={selectedUserServerId}
+                            onChange={(event) => handleUserServerChange(user.telegram_id, event.target.value)}
+                          >
+                            {servers.map((server, index) => (
+                              <option key={server.id} value={server.id}>
+                                {formatServerLabel(server, index)} · {server.protocol || 'VPN'}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+                      <div className="admin-actions">
+                        {selectedUserPeer ? (
+                          <>
+                            <button className="button" onClick={() => handleCopyPeerAccessUri(selectedUserPeer)} disabled={isBusy}>
+                              Скопировать адрес
+                            </button>
+                            <button className="button button--secondary" onClick={() => handleReissueUserPeer(user, selectedUserServerId)} disabled={isBusy}>
+                              Перевыпустить
+                            </button>
+                          </>
+                        ) : (
+                          <button className="button" onClick={() => handleCreateUserPeer(user)} disabled={isBusy}>
+                            Создать и скопировать
+                          </button>
+                        )}
+                        <button className="button button--secondary" onClick={() => handleBan(user.telegram_id)} disabled={isBusy}>
+                          Отключить
+                        </button>
+                        <button className="button button--secondary" onClick={() => handleUnban(user.telegram_id)} disabled={isBusy}>
+                          Включить
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          </>
+        )}
+
+        {error && <section className="card error">{error}</section>}
       </div>
     );
   }

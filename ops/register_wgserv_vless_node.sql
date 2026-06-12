@@ -28,9 +28,9 @@ VALUES (
   'WGServ VLESS',
   '109.107.170.43',
   'vpnguardbot.org',
-  'Russia',
+  'New York',
   'vpn-node',
-  'RU',
+  'US',
   'xray',
   'online',
   true,
@@ -61,7 +61,7 @@ INSERT INTO public.routes (
 )
 VALUES (
   'wgserv-vless-01',
-  'WGServ VLESS · Russia',
+  'WGServ VLESS · New York',
   'wgserv-vless-01',
   'wgserv-vless-01',
   'VLESS',

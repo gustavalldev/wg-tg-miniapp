@@ -22,8 +22,19 @@ body {
   padding: 24px 16px 40px;
 }
 
+.app--admin-console {
+  max-width: 1040px;
+}
+
 .app__header {
   margin-bottom: 16px;
+}
+
+.console-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .loading-notice {
@@ -402,6 +413,48 @@ body {
   gap: 10px;
 }
 
+.console-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.section-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.section-heading h2 {
+  margin: 0;
+}
+
+.server-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.server-card,
+.connection-card {
+  border: 1px solid #eef0f4;
+  border-radius: 12px;
+  padding: 12px;
+  background: #fbfcff;
+}
+
+.connection-list {
+  display: grid;
+  gap: 10px;
+}
+
+.connection-list .admin-item {
+  border-bottom: none;
+}
+
 .metric-card {
   display: grid;
   gap: 6px;
@@ -444,6 +497,15 @@ body {
   }
 
   .metrics-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .console-header {
+    display: grid;
+  }
+
+  .console-summary,
+  .server-card-grid {
     grid-template-columns: 1fr;
   }
 
