@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 
 const CHANNEL_USERNAME = import.meta.env.VITE_CHANNEL_USERNAME || '@kirillprodev';
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3000';
+const ALLOW_STANDALONE = import.meta.env.VITE_ALLOW_STANDALONE === 'true';
 const DEVICE_STORAGE_KEY = 'vpn-guard-device';
 const CLIENT_INSTALLED_STORAGE_KEY = 'vpn-guard-client-installed';
 const CLIENT_OPTIONS = [
@@ -144,13 +145,13 @@ async function postJson(path, body) {
 }
 
 function resolveTelegramContext() {
-  if (window.Telegram && window.Telegram.WebApp) {
-    return { webApp: window.Telegram.WebApp, isLocalDev: false };
+  const hostname = window.location.hostname;
+  if (ALLOW_STANDALONE || hostname === 'localhost' || hostname === '127.0.0.1') {
+    return { webApp: { initData: null, ready() {}, expand() {} }, isLocalDev: true };
   }
 
-  const hostname = window.location.hostname;
-  if (hostname === 'localhost' || hostname === '127.0.0.1') {
-    return { webApp: { initData: null, ready() {}, expand() {} }, isLocalDev: true };
+  if (window.Telegram && window.Telegram.WebApp) {
+    return { webApp: window.Telegram.WebApp, isLocalDev: false };
   }
 
   return null;

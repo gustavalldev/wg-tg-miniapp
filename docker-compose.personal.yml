@@ -1,0 +1,70 @@
+services:
+  vpn-api:
+    build:
+      context: ./wireguard-manager
+      dockerfile: api/Dockerfile
+    container_name: vpnguard-personal-api
+    restart: unless-stopped
+    environment:
+      - PORT=3010
+      - SERVER_IP=${SERVER_IP}
+      - TELEGRAM_TOKEN=${TELEGRAM_TOKEN:-}
+      - TELEGRAM_BOT_USERNAME=${TELEGRAM_BOT_USERNAME:-}
+      - CHANNEL_USERNAME=${CHANNEL_USERNAME:-}
+      - ADMIN_USERNAMES=${ADMIN_USERNAMES}
+      - ALLOW_LOCAL_WEBAPP=true
+      - DEV_TELEGRAM_ID=${DEV_TELEGRAM_ID}
+      - DEV_TELEGRAM_USERNAME=${DEV_TELEGRAM_USERNAME}
+      - SERVERS_JSON=${SERVERS_JSON}
+      - VPN_PROTOCOL_LABEL=${VPN_PROTOCOL_LABEL}
+      - VPN_PROFILE_FORMAT=${VPN_PROFILE_FORMAT}
+      - VPN_ACCESS_SCHEME=${VPN_ACCESS_SCHEME}
+      - VPN_ACCESS_PORT=${VPN_ACCESS_PORT}
+      - VPN_PROVIDER_MODE=remote-http
+      - VPN_BACKEND_URL=http://foreign-vless-provisioner:3021
+      - VPN_BACKEND_TOKEN=${VPN_BACKEND_TOKEN:-}
+      - VPN_BACKEND_TIMEOUT_MS=${VPN_BACKEND_TIMEOUT_MS:-10000}
+      - PG_HOST=postgres
+      - PG_PORT=5432
+      - PG_DATABASE=${POSTGRES_DB}
+      - PG_USER=${POSTGRES_USER}
+      - PG_PASSWORD=${POSTGRES_PASSWORD}
+    ports:
+      - "127.0.0.1:3110:3010"
+    depends_on:
+      - postgres
+    networks:
+      - default
+      - vless-node
+
+  mini-app:
+    build:
+      context: ./mini-app
+      args:
+        VITE_API_BASE: ${VITE_API_BASE}
+        VITE_CHANNEL_USERNAME: ${VITE_CHANNEL_USERNAME:-}
+        VITE_ALLOW_STANDALONE: "true"
+    container_name: vpnguard-personal-mini-app
+    restart: unless-stopped
+    environment:
+      - MINI_APP_PORT=3002
+    ports:
+      - "127.0.0.1:3112:3002"
+    depends_on:
+      - vpn-api
+
+  postgres:
+    image: postgres:15
+    container_name: vpnguard-personal-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ./data/personal-postgres:/var/lib/postgresql/data
+
+networks:
+  vless-node:
+    external: true
+    name: foreign-vless-node_default
