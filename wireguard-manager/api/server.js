@@ -49,8 +49,6 @@ const pool = new Pool({
 
 app.use(cors({
   origin: [
-    'http://45.87.247.206:3001',
-    'http://45.87.247.206:8080',
     'http://localhost:3002'
   ],
   credentials: true

@@ -210,7 +210,7 @@ CREATE INDEX IF NOT EXISTS promo_code_redemptions_promo_code_id_idx ON public.pr
 -- Seed data
 INSERT INTO public.servers (id, name, ip, host, location, role, country_code, is_default)
 VALUES
-  ('ru-entry-main', 'RU Entry Main', '45.87.247.206', 'vpn.ordbox.ru', 'Russia', 'entry', 'RU', true),
+  ('ru-entry-main', 'RU Entry Main', '203.0.113.1', 'entry.example.com', 'Russia', 'entry', 'RU', true),
   ('foreign-exit-main', 'Foreign Exit Main', '176.98.191.110', 'vpnnew1.com', 'Singapore', 'exit', 'SG', false)
 ON CONFLICT (id) DO NOTHING;
 
