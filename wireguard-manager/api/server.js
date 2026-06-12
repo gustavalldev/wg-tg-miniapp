@@ -199,6 +199,7 @@ async function ensureSchema() {
     'ALTER TABLE public.servers ADD COLUMN IF NOT EXISTS provider text',
     'ALTER TABLE public.servers ADD COLUMN IF NOT EXISTS status text DEFAULT \'online\'',
     'ALTER TABLE public.servers ADD COLUMN IF NOT EXISTS enabled boolean DEFAULT true',
+    'ALTER TABLE public.servers ADD COLUMN IF NOT EXISTS provisioner_url text',
     'ALTER TABLE public.users ADD COLUMN IF NOT EXISTS referral_code text',
     'ALTER TABLE public.users ADD COLUMN IF NOT EXISTS referred_by_user_id integer',
     'ALTER TABLE public.users ADD COLUMN IF NOT EXISTS referred_at timestamp without time zone',
@@ -409,7 +410,8 @@ function hydrateRoute(route, index = 0) {
     exit_host: route.exit_host || route.exit_ip || SERVER_IP,
     exit_ip: route.exit_ip || route.exit_host || SERVER_IP,
     exit_country_code: route.exit_country_code || 'NL',
-    profile_format: route.profile_format || VPN_PROFILE_FORMAT
+    profile_format: route.profile_format || VPN_PROFILE_FORMAT,
+    provisioner_url: route.entry_provisioner_url || route.provisioner_url || null
   });
 }
 
@@ -431,8 +433,18 @@ function hydrateServer(server, index = 0) {
     exit_host: server.exit_host || server.host || server.ip || SERVER_IP,
     exit_ip: server.exit_ip || server.ip || SERVER_IP,
     exit_country_code: server.exit_country_code || server.country_code || 'NL',
-    profile_format: server.profile_format || VPN_PROFILE_FORMAT
+    profile_format: server.profile_format || VPN_PROFILE_FORMAT,
+    provisioner_url: server.provisioner_url || server.backend_url || null
   };
+}
+
+function sanitizeServerForClient(server) {
+  const { provisioner_url, backend_url, ...publicServer } = server;
+  return publicServer;
+}
+
+function sanitizeServersForClient(servers) {
+  return servers.map(sanitizeServerForClient);
 }
 
 function getConfiguredServers() {
@@ -460,6 +472,7 @@ async function getServersFromDb() {
     const routesRes = await pool.query(
       `SELECT r.id, r.name, r.protocol, r.profile_format, r.enabled, r.is_default,
               entry.host AS entry_host, entry.ip AS entry_ip, entry.location AS entry_location, entry.country_code AS entry_country_code,
+              entry.provisioner_url AS entry_provisioner_url,
               exit.host AS exit_host, exit.ip AS exit_ip, exit.location AS exit_location, exit.country_code AS exit_country_code
        FROM routes r
        JOIN servers entry ON entry.id = r.entry_server_id
@@ -472,7 +485,7 @@ async function getServersFromDb() {
     }
 
     const res = await pool.query(
-      `SELECT id, name, ip, host, location, role, country_code, status, is_default
+      `SELECT id, name, ip, host, location, role, country_code, status, is_default, provisioner_url
        FROM servers
        ORDER BY is_default DESC, name`
     );
@@ -1298,7 +1311,7 @@ app.post('/api/webapp/connect', async (req, res) => {
       config: download.content,
       mime_type: download.mimeType,
       download_name: download.filename,
-      server: selectedServer
+      server: sanitizeServerForClient(selectedServer)
     });
   } catch (error) {
     console.error('Ошибка webapp connect:', error.message);
@@ -1525,7 +1538,7 @@ app.post('/api/webapp/admin/create-peer', async (req, res) => {
         protocol: result.peer.protocol,
         access_uri: result.peer.access_uri
       },
-      server: result.server,
+      server: sanitizeServerForClient(result.server),
       config: result.download.content,
       mime_type: result.download.mimeType,
       download_name: result.download.filename
@@ -1557,7 +1570,7 @@ app.post('/api/webapp/admin/reissue-peer', async (req, res) => {
         protocol: result.peer.protocol,
         access_uri: result.peer.access_uri
       },
-      server: result.server,
+      server: sanitizeServerForClient(result.server),
       config: result.download.content,
       mime_type: result.download.mimeType,
       download_name: result.download.filename
@@ -1956,7 +1969,7 @@ app.post('/api/sync-config', async (_req, res) => {
 app.get('/api/servers', async (_req, res) => {
   try {
     const servers = await getServersFromDb();
-    res.json({ ok: true, servers });
+    res.json({ ok: true, servers: sanitizeServersForClient(servers) });
   } catch (error) {
     console.error('Ошибка получения серверов:', error.message);
     res.status(500).json({ error: error.message });
@@ -1983,7 +1996,7 @@ app.get('/api/diagnostics', async (_req, res) => {
         profile_format: VPN_PROFILE_FORMAT,
         provider: vpnProvider.name
       },
-      servers,
+      servers: sanitizeServersForClient(servers),
       active_profiles: peers.rows
     });
   } catch (error) {

@@ -21,20 +21,22 @@ INSERT INTO public.servers (
   provider,
   status,
   enabled,
-  is_default
+  is_default,
+  provisioner_url
 )
 VALUES (
-  'wgserv-vless-01',
-  'WGServ VLESS',
-  '109.107.170.43',
-  'vpnguardbot.org',
-  'Russia',
+  'wgserv-vless-02',
+  'WGServ VLESS 02',
+  '192.124.190.175',
+  '192.124.190.175.sslip.io',
+  'Singapore',
   'vpn-node',
-  'RU',
+  'SG',
   'xray',
   'online',
   true,
-  true
+  false,
+  'http://192.124.190.175:3021'
 )
 ON CONFLICT (id) DO UPDATE
 SET
@@ -47,7 +49,8 @@ SET
   provider = EXCLUDED.provider,
   status = EXCLUDED.status,
   enabled = EXCLUDED.enabled,
-  is_default = EXCLUDED.is_default;
+  is_default = EXCLUDED.is_default,
+  provisioner_url = EXCLUDED.provisioner_url;
 
 INSERT INTO public.routes (
   id,
@@ -60,14 +63,14 @@ INSERT INTO public.routes (
   is_default
 )
 VALUES (
-  'wgserv-vless-01',
-  'WGServ VLESS · Russia',
-  'wgserv-vless-01',
-  'wgserv-vless-01',
+  'wgserv-vless-02',
+  'WGServ VLESS 02 · Singapore',
+  'wgserv-vless-02',
+  'wgserv-vless-02',
   'VLESS',
   'uri',
   true,
-  true
+  false
 )
 ON CONFLICT (id) DO UPDATE
 SET

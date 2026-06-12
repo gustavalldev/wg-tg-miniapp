@@ -96,6 +96,7 @@ CREATE TABLE IF NOT EXISTS public.servers
   status text DEFAULT 'online'::text,
   enabled boolean DEFAULT true,
   is_default boolean DEFAULT false,
+  provisioner_url text,
   created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT servers_pkey PRIMARY KEY (id)
 );
