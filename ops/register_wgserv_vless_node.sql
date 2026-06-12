@@ -1,5 +1,15 @@
 BEGIN;
 
+UPDATE public.routes
+SET enabled = false,
+    is_default = false
+WHERE id <> 'wgserv-vless-01';
+
+UPDATE public.servers
+SET enabled = false,
+    is_default = false
+WHERE id <> 'wgserv-vless-01';
+
 INSERT INTO public.servers (
   id,
   name,
@@ -24,7 +34,7 @@ VALUES (
   'xray',
   'online',
   true,
-  false
+  true
 )
 ON CONFLICT (id) DO UPDATE
 SET
@@ -57,7 +67,7 @@ VALUES (
   'VLESS',
   'uri',
   true,
-  false
+  true
 )
 ON CONFLICT (id) DO UPDATE
 SET
