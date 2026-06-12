@@ -29,9 +29,9 @@ VALUES (
   'WGServ VLESS 02',
   '192.124.190.175',
   'germ.vpnguardbot.org',
-  'Singapore',
+  'Germany',
   'vpn-node',
-  'SG',
+  'DE',
   'xray',
   'online',
   true,
@@ -64,7 +64,7 @@ INSERT INTO public.routes (
 )
 VALUES (
   'wgserv-vless-02',
-  'WGServ VLESS 02 · Singapore',
+  'WGServ VLESS 02 · Germany',
   'wgserv-vless-02',
   'wgserv-vless-02',
   'VLESS',
