@@ -38,6 +38,7 @@ const REFERRAL_REWARD_DAYS = parseInt(process.env.REFERRAL_REWARD_DAYS || '7', 1
 const PAYMENT_PROVIDER = process.env.PAYMENT_PROVIDER || 'manual';
 const SUPPORT_USERNAME = process.env.SUPPORT_USERNAME || 'vpnguardsupport';
 const PROMO_TARIFF_CODE = process.env.PROMO_TARIFF_CODE || 'promo-access';
+const PERSONAL_ADMIN_MODE = process.env.PERSONAL_ADMIN_MODE === 'true';
 
 const pool = new Pool({
   host: process.env.PG_HOST,
@@ -145,6 +146,31 @@ function getWebAppUser({ initData, devRequested }) {
 function isAdminUsername(username) {
   if (!username) return false;
   return ADMIN_USERNAMES.includes(username.replace(/^@/, ''));
+}
+
+function normalizeTelegramId(value) {
+  const normalized = String(value || '').trim();
+  if (!/^\d{1,16}$/.test(normalized)) {
+    throw new Error('telegram_id должен быть числом');
+  }
+
+  const telegramId = Number(normalized);
+  if (!Number.isSafeInteger(telegramId) || telegramId <= 0) {
+    throw new Error('telegram_id некорректен');
+  }
+
+  return telegramId;
+}
+
+function normalizeUsernameInput(value) {
+  const normalized = String(value || '').trim().replace(/^@/, '');
+  if (!normalized) return null;
+
+  if (!/^[a-zA-Z0-9_]{2,32}$/.test(normalized)) {
+    throw new Error('username может содержать только латиницу, цифры и underscore');
+  }
+
+  return normalized;
 }
 
 async function sendTelegramMessage(chatId, text) {
@@ -610,6 +636,93 @@ async function getTariffs() {
      ORDER BY sort_order, duration_days, price`
   );
   return result.rows;
+}
+
+async function getTesterTariff() {
+  return getTariffByCode('tester');
+}
+
+async function ensureLocalAdminUser({ telegramId, username }) {
+  const referralCode = await ensureUniqueReferralCode();
+  const testerTariff = await getTesterTariff();
+  const result = await pool.query(
+    `INSERT INTO users (telegram_id, username, tariff_id, tariff_expiry, referral_code, vpn_status)
+     VALUES ($1, $2, $3, NULL, $4, 'active')
+     ON CONFLICT (telegram_id) DO UPDATE
+     SET username = COALESCE(EXCLUDED.username, users.username),
+         tariff_id = COALESCE(EXCLUDED.tariff_id, users.tariff_id),
+         tariff_expiry = NULL,
+         vpn_status = 'active'
+     RETURNING id, telegram_id, username, vpn_status, created_at`,
+    [telegramId, username || null, testerTariff?.id || null, referralCode]
+  );
+
+  return result.rows[0];
+}
+
+async function getAdminUserByTelegramId(telegramId) {
+  const result = await pool.query(
+    `SELECT id, telegram_id, username, vpn_status
+     FROM users
+     WHERE telegram_id = $1
+     LIMIT 1`,
+    [telegramId]
+  );
+  return result.rows[0] || null;
+}
+
+function dbUserToTelegramUser(user) {
+  return {
+    id: Number(user.telegram_id),
+    username: user.username || `user_${user.telegram_id}`
+  };
+}
+
+function pickServer(servers, serverId) {
+  if (serverId) {
+    return servers.find(server => server.id === serverId || server.route_id === serverId) || null;
+  }
+
+  return servers.find(server => server.is_default) || servers[0] || null;
+}
+
+async function createAdminAccessProfile({ telegramId, serverId, replaceExisting, req }) {
+  const user = await getAdminUserByTelegramId(telegramId);
+  if (!user) {
+    throw new Error('Пользователь не найден');
+  }
+  if (user.vpn_status === 'blocked') {
+    throw new Error('Пользователь заблокирован');
+  }
+
+  const servers = await getServersFromDb();
+  const selectedServer = pickServer(servers, serverId);
+  if (!selectedServer) {
+    throw new Error('Выбранный сервер недоступен');
+  }
+
+  const telegramUser = dbUserToTelegramUser(user);
+  const existingPeer = await getUserPeerByUserId(user.id);
+  if (existingPeer && !replaceExisting) {
+    throw new Error('У пользователя уже есть активный профиль');
+  }
+
+  if (existingPeer) {
+    await revokePeerAccess(existingPeer, telegramUser);
+    await logAction(user.id, existingPeer.name, 'admin_reissue_old_profile', {
+      server_id: selectedServer.id
+    }, req);
+  }
+
+  const peer = await createAccessProfileForUser(user.id, telegramUser, req, selectedServer);
+  const download = buildDownload(peer);
+
+  return {
+    peer,
+    download,
+    server: selectedServer,
+    user
+  };
 }
 
 async function getPromoCodes() {
@@ -1130,6 +1243,7 @@ app.post('/api/webapp/auth', async (req, res) => {
         access_uri: peer.access_uri
       } : null,
       is_admin: isAdminUsername(result.user.username),
+      personal_admin_mode: PERSONAL_ADMIN_MODE,
       tariffs,
       referral,
       pending_payment: pendingPayment
@@ -1343,9 +1457,24 @@ app.post('/api/webapp/admin/users', async (req, res) => {
     }
 
     const users = await pool.query(
-      `SELECT u.id, u.telegram_id, u.username, u.vpn_status, u.created_at, u.tariff_expiry, t.name AS tariff_name
+      `SELECT u.id, u.telegram_id, u.username, u.vpn_status, u.created_at, u.tariff_expiry, t.name AS tariff_name,
+              active_peer.name AS active_peer_name,
+              active_peer.server_id AS active_server_id,
+              active_peer.route_id AS active_route_id,
+              active_peer.protocol AS active_protocol,
+              active_peer.created_at AS active_peer_created_at,
+              s.name AS active_server_name,
+              s.location AS active_server_location
        FROM users u
        LEFT JOIN tariffs t ON t.id = u.tariff_id
+       LEFT JOIN LATERAL (
+         SELECT name, server_id, route_id, protocol, created_at
+         FROM peers
+         WHERE user_id = u.id AND active = true
+         ORDER BY created_at DESC
+         LIMIT 1
+       ) active_peer ON true
+       LEFT JOIN servers s ON s.id = active_peer.server_id
        ${where}
        ORDER BY u.created_at DESC
        LIMIT 200`,
@@ -1355,6 +1484,86 @@ app.post('/api/webapp/admin/users', async (req, res) => {
     res.json({ ok: true, users: users.rows });
   } catch (error) {
     console.error('Ошибка admin users:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/webapp/admin/create-user', async (req, res) => {
+  try {
+    const auth = await requireAdmin(req, res);
+    if (!auth) return;
+
+    const telegramId = normalizeTelegramId(req.body.telegram_id);
+    const username = normalizeUsernameInput(req.body.username);
+    const user = await ensureLocalAdminUser({ telegramId, username });
+
+    res.json({ ok: true, user });
+  } catch (error) {
+    console.error('Ошибка admin create-user:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/webapp/admin/create-peer', async (req, res) => {
+  try {
+    const auth = await requireAdmin(req, res);
+    if (!auth) return;
+
+    const telegramId = normalizeTelegramId(req.body.telegram_id);
+    const result = await createAdminAccessProfile({
+      telegramId,
+      serverId: req.body.server_id || null,
+      replaceExisting: false,
+      req
+    });
+
+    res.json({
+      ok: true,
+      peer: {
+        name: result.peer.name,
+        ip: result.peer.ip,
+        protocol: result.peer.protocol,
+        access_uri: result.peer.access_uri
+      },
+      server: result.server,
+      config: result.download.content,
+      mime_type: result.download.mimeType,
+      download_name: result.download.filename
+    });
+  } catch (error) {
+    console.error('Ошибка admin create-peer:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/webapp/admin/reissue-peer', async (req, res) => {
+  try {
+    const auth = await requireAdmin(req, res);
+    if (!auth) return;
+
+    const telegramId = normalizeTelegramId(req.body.telegram_id);
+    const result = await createAdminAccessProfile({
+      telegramId,
+      serverId: req.body.server_id || null,
+      replaceExisting: true,
+      req
+    });
+
+    res.json({
+      ok: true,
+      peer: {
+        name: result.peer.name,
+        ip: result.peer.ip,
+        protocol: result.peer.protocol,
+        access_uri: result.peer.access_uri
+      },
+      server: result.server,
+      config: result.download.content,
+      mime_type: result.download.mimeType,
+      download_name: result.download.filename
+    });
+  } catch (error) {
+    console.error('Ошибка admin reissue-peer:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
@@ -1517,9 +1726,12 @@ app.post('/api/webapp/admin/peers', async (req, res) => {
     }
 
     const peers = await pool.query(
-      `SELECT p.name, p.ip, p.protocol, p.created_at, p.active, p.access_uri, u.username, u.telegram_id
+      `SELECT p.name, p.ip, p.protocol, p.created_at, p.active, p.access_uri,
+              p.server_id, p.route_id, s.name AS server_name, s.location AS server_location,
+              u.username, u.telegram_id
        FROM peers p
        LEFT JOIN users u ON p.user_id = u.id
+       LEFT JOIN servers s ON s.id = p.server_id
        ${where}
        ORDER BY p.created_at DESC
        LIMIT 200`,
@@ -1579,7 +1791,26 @@ app.post('/api/webapp/admin/delete-peer', async (req, res) => {
       return res.status(400).json({ error: 'name обязателен' });
     }
 
-    await pool.query('DELETE FROM peers WHERE name = $1', [name]);
+    const peerRes = await pool.query(
+      `SELECT p.name, p.ip, p.protocol, p.access_uri, p.config_payload, p.server_id, p.route_id, p.user_id,
+              u.telegram_id, u.username
+       FROM peers p
+       LEFT JOIN users u ON u.id = p.user_id
+       WHERE p.name = $1
+       LIMIT 1`,
+      [name]
+    );
+    const row = peerRes.rows[0];
+    if (!row) {
+      return res.status(404).json({ error: 'Профиль не найден' });
+    }
+
+    const peer = normalizePeer(row);
+    await revokePeerAccess(peer, {
+      id: Number(row.telegram_id),
+      username: row.username || null
+    });
+    await logAction(row.user_id, peer.name, 'admin_delete_profile', {}, req);
     res.json({ ok: true });
   } catch (error) {
     console.error('Ошибка admin delete-peer:', error.message);

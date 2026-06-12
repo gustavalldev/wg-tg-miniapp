@@ -12,6 +12,7 @@ services:
       - TELEGRAM_BOT_USERNAME=${TELEGRAM_BOT_USERNAME:-}
       - CHANNEL_USERNAME=${CHANNEL_USERNAME:-}
       - ADMIN_USERNAMES=${ADMIN_USERNAMES}
+      - PERSONAL_ADMIN_MODE=true
       - ALLOW_LOCAL_WEBAPP=true
       - DEV_TELEGRAM_ID=${DEV_TELEGRAM_ID}
       - DEV_TELEGRAM_USERNAME=${DEV_TELEGRAM_USERNAME}
@@ -44,6 +45,7 @@ services:
         VITE_API_BASE: ${VITE_API_BASE}
         VITE_CHANNEL_USERNAME: ${VITE_CHANNEL_USERNAME:-}
         VITE_ALLOW_STANDALONE: "true"
+        VITE_PERSONAL_ADMIN_MODE: "true"
     container_name: vpnguard-personal-mini-app
     restart: unless-stopped
     environment:

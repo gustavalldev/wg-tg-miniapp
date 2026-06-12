@@ -137,11 +137,30 @@ body {
   margin-bottom: 12px;
 }
 
+.admin-controls--three {
+  grid-template-columns: 1fr 1fr auto;
+}
+
+.admin-panel {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  margin-bottom: 14px;
+  border: 1px solid #e6eaf2;
+  border-radius: 14px;
+  background: #fbfcff;
+}
+
+.admin-panel h3 {
+  margin: 0;
+}
+
 .input {
   border: 1px solid #e1e4eb;
   border-radius: 10px;
   padding: 10px 12px;
   font-size: 14px;
+  min-width: 0;
 }
 
 .admin-list {
@@ -173,6 +192,10 @@ body {
   display: grid;
   gap: 8px;
   margin-bottom: 12px;
+}
+
+.compact-select {
+  margin-bottom: 4px;
 }
 
 .label {
@@ -404,6 +427,10 @@ body {
   }
 
   .admin-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-controls--three {
     grid-template-columns: 1fr;
   }
 

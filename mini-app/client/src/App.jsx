@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 const CHANNEL_USERNAME = import.meta.env.VITE_CHANNEL_USERNAME || '@kirillprodev';
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3000';
 const ALLOW_STANDALONE = import.meta.env.VITE_ALLOW_STANDALONE === 'true';
+const PERSONAL_ADMIN_MODE = import.meta.env.VITE_PERSONAL_ADMIN_MODE === 'true';
 const DEVICE_STORAGE_KEY = 'vpn-guard-device';
 const CLIENT_INSTALLED_STORAGE_KEY = 'vpn-guard-client-installed';
 const CLIENT_OPTIONS = [
@@ -179,6 +180,11 @@ export default function App() {
   const [promoCodes, setPromoCodes] = useState([]);
   const [adminMetrics, setAdminMetrics] = useState(null);
   const [adminTab, setAdminTab] = useState('overview');
+  const [newUserForm, setNewUserForm] = useState({
+    telegram_id: '',
+    username: ''
+  });
+  const [userServerSelections, setUserServerSelections] = useState({});
   const [promoForm, setPromoForm] = useState({
     code: '',
     description: '',
@@ -187,7 +193,7 @@ export default function App() {
     expires_at: ''
   });
   const [selectedServerId, setSelectedServerId] = useState('');
-  const [activeTab, setActiveTab] = useState('home');
+  const [activeTab, setActiveTab] = useState(PERSONAL_ADMIN_MODE ? 'admin' : 'home');
   const [tgContext, setTgContext] = useState(null);
   const [busyMessage, setBusyMessage] = useState('');
   const [deviceOptionId, setDeviceOptionId] = useState('');
@@ -210,6 +216,10 @@ export default function App() {
     () => servers.find((server) => server.id === selectedServerId) || servers[0] || null,
     [servers, selectedServerId]
   );
+  const defaultAdminServerId = useMemo(
+    () => selectedServerId || servers.find((server) => server.is_default)?.id || servers[0]?.id || '',
+    [servers, selectedServerId]
+  );
   const hasMultipleServers = servers.length > 1;
   const canConnectNow = Boolean(selectedServerId) && profile.has_active_access && clientInstalled && !peer;
   const isBusy = Boolean(busyMessage);
@@ -222,6 +232,33 @@ export default function App() {
     } finally {
       setBusyMessage('');
     }
+  }
+
+  function getAuthPayload(extra = {}) {
+    return {
+      initData: tgContext?.webApp?.initData || null,
+      dev: Boolean(tgContext?.isLocalDev),
+      ...extra
+    };
+  }
+
+  function getUserSelectedServerId(telegramId) {
+    return userServerSelections[String(telegramId)] || defaultAdminServerId;
+  }
+
+  function handleUserServerChange(telegramId, serverId) {
+    setUserServerSelections(prev => ({
+      ...prev,
+      [String(telegramId)]: serverId
+    }));
+  }
+
+  async function refreshAdminData() {
+    await Promise.all([
+      loadAdminMetrics(),
+      loadAdminUsers(),
+      loadAdminPeers()
+    ]);
   }
 
   useEffect(() => {
@@ -369,7 +406,9 @@ export default function App() {
       loadAdminMetrics().catch(err => setError(err.message));
       loadAdminUsers().catch(err => setError(err.message));
       loadAdminPeers().catch(err => setError(err.message));
-      loadAdminPromoCodes().catch(err => setError(err.message));
+      if (!PERSONAL_ADMIN_MODE) {
+        loadAdminPromoCodes().catch(err => setError(err.message));
+      }
     }
   }, [tgContext, isAdmin]);
 
@@ -591,6 +630,65 @@ export default function App() {
     }
   }
 
+  async function handleCreateLocalUser() {
+    if (!newUserForm.telegram_id.trim()) {
+      setError('Введите Telegram ID пользователя.');
+      return;
+    }
+
+    try {
+      await runWithBusy('Добавляем пользователя…', async () => {
+        await postJson('/api/webapp/admin/create-user', getAuthPayload({
+          telegram_id: newUserForm.telegram_id.trim(),
+          username: newUserForm.username.trim()
+        }));
+        setNewUserForm({ telegram_id: '', username: '' });
+        await refreshAdminData();
+        setStatusLine('Пользователь добавлен');
+      });
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function handleCreateUserPeer(user) {
+    try {
+      await runWithBusy('Создаём профиль…', async () => {
+        const result = await postJson('/api/webapp/admin/create-peer', getAuthPayload({
+          telegram_id: Number(user.telegram_id),
+          server_id: getUserSelectedServerId(user.telegram_id) || null
+        }));
+        if (result?.config) {
+          downloadConfigFile(result.config, result.download_name, result.mime_type);
+        }
+        await refreshAdminData();
+        setStatusLine(`Профиль создан для @${user.username || user.telegram_id}`);
+      });
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function handleReissueUserPeer(user) {
+    if (!window.confirm('Перевыпустить профиль? Старое подключение будет отозвано.')) return;
+
+    try {
+      await runWithBusy('Перевыпускаем профиль…', async () => {
+        const result = await postJson('/api/webapp/admin/reissue-peer', getAuthPayload({
+          telegram_id: Number(user.telegram_id),
+          server_id: getUserSelectedServerId(user.telegram_id) || null
+        }));
+        if (result?.config) {
+          downloadConfigFile(result.config, result.download_name, result.mime_type);
+        }
+        await refreshAdminData();
+        setStatusLine(`Профиль перевыпущен для @${user.username || user.telegram_id}`);
+      });
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
   async function handleDeletePeer(name) {
     if (!window.confirm('Удалить выбранный пир?')) return;
     try {
@@ -599,7 +697,7 @@ export default function App() {
         dev: Boolean(tgContext.isLocalDev),
         name
       });
-      await loadAdminPeers();
+      await refreshAdminData();
     } catch (err) {
       setError(err.message);
     }
@@ -720,11 +818,19 @@ export default function App() {
       {isBusy && <section className="loading-notice">{busyMessage || 'Загрузка…'}</section>}
 
       <nav className="tabs">
-        <button className={activeTab === 'home' ? 'tab tab--active' : 'tab'} onClick={() => setActiveTab('home')}>Главная</button>
-        <button className={activeTab === 'billing' ? 'tab tab--active' : 'tab'} onClick={() => setActiveTab('billing')}>Тарифы</button>
-        <button className={activeTab === 'referral' ? 'tab tab--active' : 'tab'} onClick={() => setActiveTab('referral')}>Бонусы</button>
+        <button className={activeTab === 'home' ? 'tab tab--active' : 'tab'} onClick={() => setActiveTab('home')}>
+          {PERSONAL_ADMIN_MODE ? 'Мой доступ' : 'Главная'}
+        </button>
+        {!PERSONAL_ADMIN_MODE && (
+          <button className={activeTab === 'billing' ? 'tab tab--active' : 'tab'} onClick={() => setActiveTab('billing')}>Тарифы</button>
+        )}
+        {!PERSONAL_ADMIN_MODE && (
+          <button className={activeTab === 'referral' ? 'tab tab--active' : 'tab'} onClick={() => setActiveTab('referral')}>Бонусы</button>
+        )}
         <button className={activeTab === 'servers' ? 'tab tab--active' : 'tab'} onClick={() => setActiveTab('servers')}>Серверы</button>
-        <button className={activeTab === 'support' ? 'tab tab--active' : 'tab'} onClick={() => setActiveTab('support')}>Помощь</button>
+        {!PERSONAL_ADMIN_MODE && (
+          <button className={activeTab === 'support' ? 'tab tab--active' : 'tab'} onClick={() => setActiveTab('support')}>Помощь</button>
+        )}
         {isAdmin && (
           <button className={activeTab === 'admin' ? 'tab tab--active' : 'tab'} onClick={() => setActiveTab('admin')}>Админка</button>
         )}
@@ -744,19 +850,21 @@ export default function App() {
       {subscribed && activeTab === 'home' && (
         <>
           <section className="card">
-            <h2>Ваш аккаунт</h2>
+            <h2>{PERSONAL_ADMIN_MODE ? 'Локальный доступ' : 'Ваш аккаунт'}</h2>
             <div className="info">
-              {'Тариф: ' + (profile.tariff_name || 'Без тарифа')}
-              {'\nПодключений: ' + (profile.connections_count ?? 0)}
-              {'\nДействует до: ' + formatDate(profile.tariff_expiry)}
-              {'\nVPN статус: ' + (profile.vpn_status || 'active')}
+              {PERSONAL_ADMIN_MODE
+                ? `Подключений: ${profile.connections_count ?? 0}\nVPN статус: ${profile.vpn_status || 'active'}`
+                : 'Тариф: ' + (profile.tariff_name || 'Без тарифа')
+                  + '\nПодключений: ' + (profile.connections_count ?? 0)
+                  + '\nДействует до: ' + formatDate(profile.tariff_expiry)
+                  + '\nVPN статус: ' + (profile.vpn_status || 'active')}
             </div>
-            {!profile.has_active_access && (
+            {!PERSONAL_ADMIN_MODE && !profile.has_active_access && (
               <p className="billing-alert">
                 Для продолжения работы выберите подходящий тариф.
               </p>
             )}
-            {profile.tariff_code === 'trial-30d' && profile.has_active_access && (
+            {!PERSONAL_ADMIN_MODE && profile.tariff_code === 'trial-30d' && profile.has_active_access && (
               <p className="billing-note">
                 У новых пользователей первый месяц бесплатный. После этого понадобится платный тариф.
               </p>
@@ -887,26 +995,30 @@ export default function App() {
             )}
           </section>
 
-          <section className="card">
-            <h2>Поддержка</h2>
-            <p>Если есть вопросы по доступу или оплате, пишите в поддержку.</p>
-            <a className="link" href="https://t.me/vpnguardsupport" target="_blank" rel="noreferrer">@vpnguardsupport</a>
-            <div className="actions" style={{ marginTop: 12 }}>
-              <a className="button button--secondary" href={legalLinks.contact} target="_blank" rel="noreferrer">Контакты и форма обращения</a>
-            </div>
-          </section>
+          {!PERSONAL_ADMIN_MODE && (
+            <>
+              <section className="card">
+                <h2>Поддержка</h2>
+                <p>Если есть вопросы по доступу или оплате, пишите в поддержку.</p>
+                <a className="link" href="https://t.me/vpnguardsupport" target="_blank" rel="noreferrer">@vpnguardsupport</a>
+                <div className="actions" style={{ marginTop: 12 }}>
+                  <a className="button button--secondary" href={legalLinks.contact} target="_blank" rel="noreferrer">Контакты и форма обращения</a>
+                </div>
+              </section>
 
-          <section className="card">
-            <h2>Документы</h2>
-            <div className="actions">
-              <a className="button button--secondary" href={legalLinks.privacy} target="_blank" rel="noreferrer">Политика конфиденциальности</a>
-              <a className="button button--secondary" href={legalLinks.terms} target="_blank" rel="noreferrer">Пользовательское соглашение</a>
-            </div>
-          </section>
+              <section className="card">
+                <h2>Документы</h2>
+                <div className="actions">
+                  <a className="button button--secondary" href={legalLinks.privacy} target="_blank" rel="noreferrer">Политика конфиденциальности</a>
+                  <a className="button button--secondary" href={legalLinks.terms} target="_blank" rel="noreferrer">Пользовательское соглашение</a>
+                </div>
+              </section>
+            </>
+          )}
         </>
       )}
 
-      {subscribed && activeTab === 'billing' && (
+      {!PERSONAL_ADMIN_MODE && subscribed && activeTab === 'billing' && (
         <section className="card">
           <h2>Тарифы</h2>
           <p className="muted">Выберите подходящий тариф. Первый месяц для новых пользователей бесплатный.</p>
@@ -943,7 +1055,7 @@ export default function App() {
         </section>
       )}
 
-      {subscribed && activeTab === 'referral' && (
+      {!PERSONAL_ADMIN_MODE && subscribed && activeTab === 'referral' && (
         <section className="card">
           <h2>Бонусы за приглашения</h2>
           <p className="muted">
@@ -1021,9 +1133,13 @@ export default function App() {
           <div className="admin-subtabs">
             <button className={adminTab === 'overview' ? 'tab tab--active' : 'tab'} onClick={() => setAdminTab('overview')}>Обзор</button>
             <button className={adminTab === 'users' ? 'tab tab--active' : 'tab'} onClick={() => setAdminTab('users')}>Пользователи</button>
-            <button className={adminTab === 'peers' ? 'tab tab--active' : 'tab'} onClick={() => setAdminTab('peers')}>Профили</button>
-            <button className={adminTab === 'promo' ? 'tab tab--active' : 'tab'} onClick={() => setAdminTab('promo')}>Промокоды</button>
-            <button className={adminTab === 'broadcast' ? 'tab tab--active' : 'tab'} onClick={() => setAdminTab('broadcast')}>Рассылка</button>
+            <button className={adminTab === 'peers' ? 'tab tab--active' : 'tab'} onClick={() => setAdminTab('peers')}>Подключения</button>
+            {!PERSONAL_ADMIN_MODE && (
+              <button className={adminTab === 'promo' ? 'tab tab--active' : 'tab'} onClick={() => setAdminTab('promo')}>Промокоды</button>
+            )}
+            {!PERSONAL_ADMIN_MODE && (
+              <button className={adminTab === 'broadcast' ? 'tab tab--active' : 'tab'} onClick={() => setAdminTab('broadcast')}>Рассылка</button>
+            )}
           </div>
 
           {adminTab === 'overview' && (
@@ -1040,32 +1156,62 @@ export default function App() {
                   <span className="muted">Активный доступ</span>
                   <strong>{formatMetricValue(adminMetrics?.active_access_users)}</strong>
                 </div>
-                <div className="metric-card">
-                  <span className="muted">Активные платные тарифы</span>
-                  <strong>{formatMetricValue(adminMetrics?.active_paid_subscriptions)}</strong>
-                </div>
+                {!PERSONAL_ADMIN_MODE && (
+                  <div className="metric-card">
+                    <span className="muted">Активные платные тарифы</span>
+                    <strong>{formatMetricValue(adminMetrics?.active_paid_subscriptions)}</strong>
+                  </div>
+                )}
                 <div className="metric-card">
                   <span className="muted">Активные профили</span>
                   <strong>{formatMetricValue(adminMetrics?.active_profiles)}</strong>
                 </div>
-                <div className="metric-card">
-                  <span className="muted">Оплаченных заказов</span>
-                  <strong>{formatMetricValue(adminMetrics?.paid_orders_count)}</strong>
-                </div>
-                <div className="metric-card">
-                  <span className="muted">Выручка, ₽</span>
-                  <strong>{formatMetricValue(adminMetrics?.paid_revenue_rub)}</strong>
-                </div>
-                <div className="metric-card">
-                  <span className="muted">Активные промокоды</span>
-                  <strong>{formatMetricValue(adminMetrics?.active_promo_codes)}</strong>
-                </div>
+                {!PERSONAL_ADMIN_MODE && (
+                  <>
+                    <div className="metric-card">
+                      <span className="muted">Оплаченных заказов</span>
+                      <strong>{formatMetricValue(adminMetrics?.paid_orders_count)}</strong>
+                    </div>
+                    <div className="metric-card">
+                      <span className="muted">Выручка, ₽</span>
+                      <strong>{formatMetricValue(adminMetrics?.paid_revenue_rub)}</strong>
+                    </div>
+                    <div className="metric-card">
+                      <span className="muted">Активные промокоды</span>
+                      <strong>{formatMetricValue(adminMetrics?.active_promo_codes)}</strong>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           )}
 
           {adminTab === 'users' && (
             <div className="admin-section">
+              {PERSONAL_ADMIN_MODE && (
+                <div className="admin-panel">
+                  <h3>Добавить пользователя</h3>
+                  <div className="admin-controls admin-controls--three">
+                    <input
+                      className="input"
+                      inputMode="numeric"
+                      placeholder="Telegram ID"
+                      value={newUserForm.telegram_id}
+                      onChange={(event) => setNewUserForm(prev => ({ ...prev, telegram_id: event.target.value }))}
+                    />
+                    <input
+                      className="input"
+                      placeholder="username без @"
+                      value={newUserForm.username}
+                      onChange={(event) => setNewUserForm(prev => ({ ...prev, username: event.target.value }))}
+                    />
+                    <button className="button" onClick={handleCreateLocalUser} disabled={isBusy}>
+                      {isBusy ? 'Подождите…' : 'Добавить'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div className="admin-controls">
                 <input
                   className="input"
@@ -1080,12 +1226,53 @@ export default function App() {
                 {users.length === 0 && <span className="muted">Нет данных</span>}
                 {users.map(user => (
                   <div key={user.telegram_id} className="admin-item">
-                    <div><strong>@{user.username || '—'}</strong> (id: {user.telegram_id})</div>
-                    <div>Тариф: {user.tariff_name || '—'}</div>
+                    <div className="server-row">
+                      <strong>@{user.username || '—'}</strong>
+                      <span className="muted">id: {user.telegram_id}</span>
+                      <span className={`status-pill status-pill--${user.vpn_status === 'blocked' ? 'offline' : 'online'}`}>
+                        {user.vpn_status === 'blocked' ? 'Отключён' : 'Активен'}
+                      </span>
+                    </div>
+                    {!PERSONAL_ADMIN_MODE && <div>Тариф: {user.tariff_name || '—'}</div>}
                     <div>Статус: {user.vpn_status || 'active'}</div>
+                    <div className="muted">
+                      Подключение: {user.active_peer_name || 'нет'}
+                      {user.active_server_name ? ` · ${user.active_server_name}` : ''}
+                    </div>
+                    {PERSONAL_ADMIN_MODE && servers.length > 0 && (
+                      <div className="server-select compact-select">
+                        <label className="label" htmlFor={`server-${user.telegram_id}`}>Сервер для нового профиля</label>
+                        <select
+                          id={`server-${user.telegram_id}`}
+                          className="input"
+                          value={getUserSelectedServerId(user.telegram_id)}
+                          onChange={(event) => handleUserServerChange(user.telegram_id, event.target.value)}
+                        >
+                          {servers.map((server, index) => (
+                            <option key={server.id} value={server.id}>
+                              {formatServerTitle(index)} · {formatServerLocation(server.location)} · {server.protocol || 'VPN'}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                     <div className="admin-actions">
-                      <button className="button button--secondary" onClick={() => handleBan(user.telegram_id)}>Забанить</button>
-                      <button className="button button--secondary" onClick={() => handleUnban(user.telegram_id)}>Разбанить</button>
+                      {PERSONAL_ADMIN_MODE && !user.active_peer_name && (
+                        <button className="button" onClick={() => handleCreateUserPeer(user)} disabled={isBusy}>
+                          Создать профиль
+                        </button>
+                      )}
+                      {PERSONAL_ADMIN_MODE && user.active_peer_name && (
+                        <button className="button" onClick={() => handleReissueUserPeer(user)} disabled={isBusy}>
+                          Перевыпустить
+                        </button>
+                      )}
+                      <button className="button button--secondary" onClick={() => handleBan(user.telegram_id)}>
+                        {PERSONAL_ADMIN_MODE ? 'Отключить' : 'Забанить'}
+                      </button>
+                      <button className="button button--secondary" onClick={() => handleUnban(user.telegram_id)}>
+                        {PERSONAL_ADMIN_MODE ? 'Включить' : 'Разбанить'}
+                      </button>
                     </div>
                   </div>
                 ))}
@@ -1103,7 +1290,7 @@ export default function App() {
                   onChange={(event) => setPeersSearch(event.target.value)}
                   onKeyDown={(event) => event.key === 'Enter' && loadAdminPeers()}
                 />
-                <button className="button button--secondary" onClick={loadAdminPeers}>Обновить пиры</button>
+                <button className="button button--secondary" onClick={loadAdminPeers}>Обновить подключения</button>
               </div>
               <div className="admin-list">
                 {peers.length === 0 && <span className="muted">Нет данных</span>}
@@ -1115,7 +1302,31 @@ export default function App() {
                       Идентификатор: {peerItem.ip || '—'}
                     </div>
                     <div>Пользователь: @{peerItem.username || '—'} ({peerItem.telegram_id || '—'})</div>
+                    <div className="muted">
+                      Сервер: {peerItem.server_name || peerItem.server_id || '—'}
+                      {peerItem.server_location ? ` · ${formatServerLocation(peerItem.server_location)}` : ''}
+                    </div>
+                    {PERSONAL_ADMIN_MODE && servers.length > 0 && (
+                      <div className="server-select compact-select">
+                        <label className="label" htmlFor={`peer-server-${peerItem.name}`}>Перевыпустить на сервере</label>
+                        <select
+                          id={`peer-server-${peerItem.name}`}
+                          className="input"
+                          value={getUserSelectedServerId(peerItem.telegram_id)}
+                          onChange={(event) => handleUserServerChange(peerItem.telegram_id, event.target.value)}
+                        >
+                          {servers.map((server, index) => (
+                            <option key={server.id} value={server.id}>
+                              {formatServerTitle(index)} · {formatServerLocation(server.location)} · {server.protocol || 'VPN'}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                     <div className="admin-actions">
+                      {PERSONAL_ADMIN_MODE && (
+                        <button className="button" onClick={() => handleReissueUserPeer(peerItem)} disabled={isBusy}>Перевыпустить</button>
+                      )}
                       <button className="button button--secondary" onClick={() => handleDeletePeer(peerItem.name)}>Удалить профиль</button>
                       <button className="button button--secondary" onClick={() => handleDownloadPeer(peerItem.name)}>Скачать профиль</button>
                     </div>
@@ -1215,7 +1426,7 @@ export default function App() {
         </section>
       )}
 
-      {activeTab === 'support' && (
+      {!PERSONAL_ADMIN_MODE && activeTab === 'support' && (
         <>
           <section className="card">
             <h2>Быстрое подключение</h2>
