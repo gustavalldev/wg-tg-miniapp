@@ -28,7 +28,7 @@ VALUES (
   'wgserv-vless-02',
   'WGServ VLESS 02',
   '192.124.190.175',
-  '192.124.190.175.sslip.io',
+  'germ.vpnguardbot.org',
   'Singapore',
   'vpn-node',
   'SG',
