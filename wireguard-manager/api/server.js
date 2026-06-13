@@ -1259,7 +1259,19 @@ async function createAccessProfileForUser(userDbId, telegramUser, req, server) {
     await pool.query(
       `INSERT INTO access_profiles
        (user_id, route_id, server_id, profile_name, profile_token, protocol, profile_format, access_uri, config_payload, provider_meta)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       ON CONFLICT (profile_name) DO UPDATE
+       SET user_id = EXCLUDED.user_id,
+           route_id = EXCLUDED.route_id,
+           server_id = EXCLUDED.server_id,
+           profile_token = EXCLUDED.profile_token,
+           protocol = EXCLUDED.protocol,
+           profile_format = EXCLUDED.profile_format,
+           access_uri = EXCLUDED.access_uri,
+           config_payload = EXCLUDED.config_payload,
+           provider_meta = EXCLUDED.provider_meta,
+           active = true,
+           revoked_at = NULL`,
       [
         userDbId,
         server.route_id || server.id,
