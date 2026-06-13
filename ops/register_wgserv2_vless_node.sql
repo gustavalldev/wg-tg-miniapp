@@ -26,13 +26,13 @@ INSERT INTO public.servers (
 )
 VALUES (
   'wgserv-vless-02',
-  'WGServ VLESS 02',
+  'WGServ WireGuard 02',
   '192.124.190.175',
   'germ.vpnguardbot.org',
   'Germany',
   'vpn-node',
   'DE',
-  'xray',
+  'wireguard',
   'online',
   true,
   false,
@@ -64,11 +64,11 @@ INSERT INTO public.routes (
 )
 VALUES (
   'wgserv-vless-02',
-  'WGServ VLESS 02 · Germany',
+  'WGServ WireGuard 02 · Germany',
   'wgserv-vless-02',
   'wgserv-vless-02',
-  'VLESS',
-  'uri',
+  'WireGuard',
+  'conf',
   true,
   false
 )

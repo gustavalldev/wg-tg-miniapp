@@ -1188,13 +1188,18 @@ function sanitizeName(value) {
 
 function buildDownload(peer) {
   const format = peer.profile_format || VPN_PROFILE_FORMAT;
-  const downloadName = peer.download_name || `${peer.name}.${format === 'uri' ? 'txt' : 'json'}`;
+  const isTextProfile = ['uri', 'conf'].includes(format);
+  const downloadName = peer.download_name || `${peer.name}.${format === 'uri' ? 'txt' : format === 'conf' ? 'conf' : 'json'}`;
+  const configPayload = peer.config_payload || {};
+  const wireGuardConfig = configPayload.wireguard_config || configPayload.client_config || '';
   return {
     filename: downloadName,
-    mimeType: format === 'uri' ? 'text/plain' : 'application/json',
+    mimeType: isTextProfile ? 'text/plain' : 'application/json',
     content: format === 'uri'
       ? (peer.access_uri || '')
-      : JSON.stringify(peer.config_payload || {}, null, 2)
+      : format === 'conf'
+        ? wireGuardConfig
+        : JSON.stringify(configPayload, null, 2)
   };
 }
 

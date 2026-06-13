@@ -66,12 +66,23 @@ function formatServerLabel(server, index) {
 
 function formatServerEndpoint(server) {
   const host = server?.host || server?.entry_host || server?.ip || '—';
-  return host === '—' ? host : `${host}:8443`;
+  const protocol = String(server?.protocol || '').toLowerCase();
+  const port = protocol === 'wireguard' ? '51820' : '8443';
+  return host === '—' ? host : `${host}:${port}`;
 }
 
 function formatConnectionName(item) {
   if (!item) return '—';
   return item.username || item.name || `Подключение ${item.telegram_id || '—'}`;
+}
+
+function isWireGuardProfile(item) {
+  return String(item?.protocol || '').toLowerCase() === 'wireguard';
+}
+
+function formatPeerServerEndpoint(peerItem) {
+  if (!peerItem?.server_host) return '';
+  return `${peerItem.server_host}:${isWireGuardProfile(peerItem) ? '51820' : '8443'}`;
 }
 
 function normalizeServerStatus(status) {
@@ -537,7 +548,23 @@ export default function App() {
   }
 
   async function handleCopyPeerAccessUri(peerItem) {
-    await copyPeerAddress(peerItem, `Адрес скопирован: ${peerItem.name}`);
+    if (peerItem?.access_uri) {
+      await copyPeerAddress(peerItem, `Адрес скопирован: ${peerItem.name}`);
+      return;
+    }
+
+    try {
+      const result = await postJson('/api/webapp/admin/peer-config', getAuthPayload({ name: peerItem.name }));
+      if (!result?.config) {
+        setError('Конфиг подключения недоступен.');
+        return;
+      }
+      await copyToClipboard(result.config);
+      setError('');
+      setStatusLine(`Конфиг скопирован: ${peerItem.name}`);
+    } catch (_err) {
+      setError('Не удалось скопировать конфиг подключения.');
+    }
   }
 
   function handleOpenInClient() {
@@ -741,7 +768,7 @@ export default function App() {
 
   function handleOpenPeerInClient(peerItem) {
     if (!peerItem?.access_uri) {
-      setError('Адрес подключения недоступен.');
+      setError('Для WireGuard скопируйте конфиг и импортируйте его в приложение WireGuard.');
       return;
     }
 
@@ -758,6 +785,10 @@ export default function App() {
         }));
         if (PERSONAL_ADMIN_MODE && result?.peer?.access_uri) {
           await copyPeerAddress(result.peer, `Профиль создан и адрес скопирован: ${formatConnectionName(user)}`);
+        } else if (PERSONAL_ADMIN_MODE && result?.config) {
+          await copyToClipboard(result.config);
+          setError('');
+          setStatusLine(`Профиль создан и конфиг скопирован: ${formatConnectionName(user)}`);
         } else if (result?.config) {
           downloadConfigFile(result.config, result.download_name, result.mime_type);
         }
@@ -782,6 +813,10 @@ export default function App() {
         }));
         if (PERSONAL_ADMIN_MODE && result?.peer?.access_uri) {
           await copyPeerAddress(result.peer, `Профиль перевыпущен и адрес скопирован: ${formatConnectionName(user)}`);
+        } else if (PERSONAL_ADMIN_MODE && result?.config) {
+          await copyToClipboard(result.config);
+          setError('');
+          setStatusLine(`Профиль перевыпущен и конфиг скопирован: ${formatConnectionName(user)}`);
         } else if (result?.config) {
           downloadConfigFile(result.config, result.download_name, result.mime_type);
         }
@@ -1021,16 +1056,16 @@ export default function App() {
                     </div>
                     <div>
                       Сервер: {formatServerLocation(peerItem.server_location)}
-                      {peerItem.server_host ? ` · ${peerItem.server_host}:8443` : ''}
+                      {peerItem.server_host ? ` · ${formatPeerServerEndpoint(peerItem)}` : ''}
                     </div>
                     <div className="muted">Профиль: {peerItem.ip || '—'} · {peerItem.protocol || 'VPN'}</div>
                     <div className="admin-actions">
                       <button className="button" onClick={() => handleCopyPeerAccessUri(peerItem)} disabled={isBusy}>
-                        Скопировать адрес
+                        {isWireGuardProfile(peerItem) ? 'Скопировать конфиг' : 'Скопировать адрес'}
                       </button>
-                      <button className="button button--secondary" onClick={() => handleOpenPeerInClient(peerItem)} disabled={isBusy}>
+                      {!isWireGuardProfile(peerItem) && <button className="button button--secondary" onClick={() => handleOpenPeerInClient(peerItem)} disabled={isBusy}>
                         Открыть
-                      </button>
+                      </button>}
                       <button className="button button--secondary" onClick={() => handleReissueUserPeer(peerItem, peerItem.server_id || peerItem.route_id)} disabled={isBusy}>
                         Перевыпустить
                       </button>
@@ -1112,7 +1147,7 @@ export default function App() {
                         {selectedUserPeer ? (
                           <>
                             <button className="button" onClick={() => handleCopyPeerAccessUri(selectedUserPeer)} disabled={isBusy}>
-                              Скопировать адрес
+                              {isWireGuardProfile(selectedUserPeer) ? 'Скопировать конфиг' : 'Скопировать адрес'}
                             </button>
                             <button className="button button--secondary" onClick={() => handleReissueUserPeer(user, selectedUserServerId)} disabled={isBusy}>
                               Перевыпустить
