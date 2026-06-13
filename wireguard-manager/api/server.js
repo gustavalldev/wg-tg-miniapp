@@ -1927,7 +1927,17 @@ app.post('/api/webapp/admin/peer-config', async (req, res) => {
     }
 
     const peerRes = await pool.query(
-      'SELECT name, ip, protocol, access_uri, config_payload, server_id FROM peers WHERE name = $1',
+      `SELECT p.name,
+              p.ip,
+              p.protocol,
+              p.access_uri,
+              COALESCE(ap.config_payload, p.config_payload) AS config_payload,
+              p.server_id,
+              ap.profile_format
+       FROM peers p
+       LEFT JOIN access_profiles ap ON ap.profile_name = p.name AND ap.active = true
+       WHERE p.name = $1
+       LIMIT 1`,
       [name]
     );
     const peer = normalizePeer(peerRes.rows[0] || null);
