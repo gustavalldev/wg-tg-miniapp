@@ -766,6 +766,10 @@ export default function App() {
     )) || null;
   }
 
+  function getServerById(serverId) {
+    return servers.find(server => server.id === serverId || server.route_id === serverId) || null;
+  }
+
   function handleOpenPeerInClient(peerItem) {
     if (!peerItem?.access_uri) {
       setError('Для WireGuard скопируйте конфиг и импортируйте его в приложение WireGuard.');
@@ -783,12 +787,15 @@ export default function App() {
           telegram_id: Number(user.telegram_id),
           server_id: getUserSelectedServerId(user.telegram_id) || null
         }));
-        if (PERSONAL_ADMIN_MODE && result?.peer?.access_uri) {
+        if (PERSONAL_ADMIN_MODE && isWireGuardProfile(result?.peer) && result?.config) {
+          downloadConfigFile(result.config, result.download_name, result.mime_type);
+          setError('');
+          setStatusLine(`Профиль создан и конфиг скачан: ${formatConnectionName(user)}`);
+        } else if (PERSONAL_ADMIN_MODE && result?.peer?.access_uri) {
           await copyPeerAddress(result.peer, `Профиль создан и адрес скопирован: ${formatConnectionName(user)}`);
         } else if (PERSONAL_ADMIN_MODE && result?.config) {
-          await copyToClipboard(result.config);
-          setError('');
-          setStatusLine(`Профиль создан и конфиг скопирован: ${formatConnectionName(user)}`);
+          downloadConfigFile(result.config, result.download_name, result.mime_type);
+          setStatusLine(`Профиль создан и файл скачан: ${formatConnectionName(user)}`);
         } else if (result?.config) {
           downloadConfigFile(result.config, result.download_name, result.mime_type);
         }
@@ -811,12 +818,15 @@ export default function App() {
           telegram_id: Number(user.telegram_id),
           server_id: serverIdOverride || getUserSelectedServerId(user.telegram_id) || null
         }));
-        if (PERSONAL_ADMIN_MODE && result?.peer?.access_uri) {
+        if (PERSONAL_ADMIN_MODE && isWireGuardProfile(result?.peer) && result?.config) {
+          downloadConfigFile(result.config, result.download_name, result.mime_type);
+          setError('');
+          setStatusLine(`Профиль перевыпущен и конфиг скачан: ${formatConnectionName(user)}`);
+        } else if (PERSONAL_ADMIN_MODE && result?.peer?.access_uri) {
           await copyPeerAddress(result.peer, `Профиль перевыпущен и адрес скопирован: ${formatConnectionName(user)}`);
         } else if (PERSONAL_ADMIN_MODE && result?.config) {
-          await copyToClipboard(result.config);
-          setError('');
-          setStatusLine(`Профиль перевыпущен и конфиг скопирован: ${formatConnectionName(user)}`);
+          downloadConfigFile(result.config, result.download_name, result.mime_type);
+          setStatusLine(`Профиль перевыпущен и файл скачан: ${formatConnectionName(user)}`);
         } else if (result?.config) {
           downloadConfigFile(result.config, result.download_name, result.mime_type);
         }
@@ -853,6 +863,8 @@ export default function App() {
       });
       if (result?.config) {
         downloadConfigFile(result.config, result.download_name, result.mime_type);
+        setError('');
+        setStatusLine('Файл конфигурации скачан');
       }
     } catch (err) {
       setError(err.message);
@@ -1060,8 +1072,12 @@ export default function App() {
                     </div>
                     <div className="muted">Профиль: {peerItem.ip || '—'} · {peerItem.protocol || 'VPN'}</div>
                     <div className="admin-actions">
-                      <button className="button" onClick={() => handleCopyPeerAccessUri(peerItem)} disabled={isBusy}>
-                        {isWireGuardProfile(peerItem) ? 'Скопировать конфиг' : 'Скопировать адрес'}
+                      <button
+                        className="button"
+                        onClick={() => isWireGuardProfile(peerItem) ? handleDownloadPeer(peerItem.name) : handleCopyPeerAccessUri(peerItem)}
+                        disabled={isBusy}
+                      >
+                        {isWireGuardProfile(peerItem) ? 'Скачать конфиг' : 'Скопировать адрес'}
                       </button>
                       {!isWireGuardProfile(peerItem) && <button className="button button--secondary" onClick={() => handleOpenPeerInClient(peerItem)} disabled={isBusy}>
                         Открыть
@@ -1112,6 +1128,7 @@ export default function App() {
                 {users.length === 0 && <span className="muted">Нет данных</span>}
                 {users.map(user => {
                   const selectedUserServerId = getUserSelectedServerId(user.telegram_id);
+                  const selectedUserServer = getServerById(selectedUserServerId);
                   const selectedUserPeer = getPeerForUserOnServer(user, selectedUserServerId);
                   const userPeers = getPeersForUser(user);
                   return (
@@ -1146,8 +1163,12 @@ export default function App() {
                       <div className="admin-actions">
                         {selectedUserPeer ? (
                           <>
-                            <button className="button" onClick={() => handleCopyPeerAccessUri(selectedUserPeer)} disabled={isBusy}>
-                              {isWireGuardProfile(selectedUserPeer) ? 'Скопировать конфиг' : 'Скопировать адрес'}
+                            <button
+                              className="button"
+                              onClick={() => isWireGuardProfile(selectedUserPeer) ? handleDownloadPeer(selectedUserPeer.name) : handleCopyPeerAccessUri(selectedUserPeer)}
+                              disabled={isBusy}
+                            >
+                              {isWireGuardProfile(selectedUserPeer) ? 'Скачать конфиг' : 'Скопировать адрес'}
                             </button>
                             <button className="button button--secondary" onClick={() => handleReissueUserPeer(user, selectedUserServerId)} disabled={isBusy}>
                               Перевыпустить
@@ -1155,7 +1176,7 @@ export default function App() {
                           </>
                         ) : (
                           <button className="button" onClick={() => handleCreateUserPeer(user)} disabled={isBusy}>
-                            Создать и скопировать
+                            {isWireGuardProfile(selectedUserServer) ? 'Создать и скачать' : 'Создать и скопировать'}
                           </button>
                         )}
                         <button className="button button--secondary" onClick={() => handleBan(user.telegram_id)} disabled={isBusy}>
