@@ -1187,10 +1187,13 @@ function sanitizeName(value) {
 }
 
 function buildDownload(peer) {
-  const format = peer.profile_format || VPN_PROFILE_FORMAT;
+  const configPayload = peer.config_payload || {};
+  const inferredFormat = String(peer.protocol || '').toLowerCase() === 'wireguard' || configPayload.wireguard_config
+    ? 'conf'
+    : VPN_PROFILE_FORMAT;
+  const format = peer.profile_format || inferredFormat;
   const isTextProfile = ['uri', 'conf'].includes(format);
   const downloadName = peer.download_name || `${peer.name}.${format === 'uri' ? 'txt' : format === 'conf' ? 'conf' : 'json'}`;
-  const configPayload = peer.config_payload || {};
   const wireGuardConfig = configPayload.wireguard_config || configPayload.client_config || '';
   return {
     filename: downloadName,
